@@ -298,120 +298,163 @@ def process_ocr_cached(image_bytes, rotate_angle):
 
 
 # ---------------------------------------------------------
-# 6. STREAMLIT UI SETUP & COMPACT AESTHETIC STYLING
+# 6. STREAMLIT UI SETUP & MONEYCONTROL-INSPIRED STYLING
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="FD Portfolio Manager",
+    page_title="Moneycontrol | FD Tracker",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# Custom CSS for Single-Page Ultra-Compact Fit
+# Custom Moneycontrol CSS Styling
 st.markdown(
     """
     <style>
-        /* Compact Page Layout & Margins */
+        /* Global Page Adjustments */
         .block-container {
-            padding-top: 0.8rem !important;
-            padding-bottom: 0.5rem !important;
+            padding-top: 0rem !important;
+            padding-bottom: 1rem !important;
             padding-left: 1.5rem !important;
             padding-right: 1.5rem !important;
         }
         .stApp {
-            background-color: #F8FAFC;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #F4F6F8;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
-        /* Compact Header */
-        .header-hero {
-            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+        /* Moneycontrol Dark Navigation Header */
+        .mc-header {
+            background-color: #1E222D;
             color: #FFFFFF;
-            padding: 0.75rem 1.25rem;
-            border-radius: 10px;
-            margin-bottom: 0.75rem;
-            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+            padding: 0.8rem 1.5rem;
+            margin-left: -1.5rem;
+            margin-right: -1.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 3px solid #FF6600;
         }
-        .header-hero h1 {
-            color: #F8FAFC !important;
-            font-weight: 700 !important;
-            font-size: 1.35rem !important;
-            margin: 0 !important;
+        .mc-brand {
+            font-weight: 900;
+            font-size: 1.4rem;
+            letter-spacing: -0.5px;
+            color: #FFFFFF;
         }
-        .header-hero p {
+        .mc-brand span {
+            color: #FF6600;
+        }
+        .mc-subtext {
             color: #94A3B8;
             font-size: 0.8rem;
-            margin-top: 0.15rem;
-            margin-bottom: 0;
+            margin-left: 12px;
+            border-left: 1px solid #334155;
+            padding-left: 12px;
         }
 
-        /* Compact Metric Cards */
+        /* Moneycontrol-style Metric Cards */
         div[data-testid="stMetric"] {
             background-color: #FFFFFF;
-            padding: 0.4rem 0.8rem;
-            border-radius: 8px;
-            border: 1px solid #E2E8F0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            border: 1px solid #E0E6ED;
+            border-top: 3px solid #1E222D;
+            border-radius: 4px;
+            padding: 0.6rem 0.9rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         }
         div[data-testid="stMetricLabel"] {
             color: #64748B !important;
-            font-size: 0.7rem !important;
-            font-weight: 600 !important;
+            font-size: 0.72rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.5px;
             text-transform: uppercase;
         }
         div[data-testid="stMetricValue"] {
             color: #0F172A !important;
-            font-size: 1.15rem !important;
-            font-weight: 700 !important;
+            font-size: 1.25rem !important;
+            font-weight: 800 !important;
         }
 
-        /* Form & Tab Spacing */
-        div[data-testid="stForm"] {
-            background-color: #FFFFFF;
-            padding: 0.8rem;
-            border-radius: 8px;
-            border: 1px solid #E2E8F0;
-        }
+        /* Moneycontrol Orange Tabs */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 6px;
+            gap: 4px;
+            border-bottom: 1px solid #CBD5E1;
+            margin-bottom: 0.8rem;
         }
         .stTabs [data-baseweb="tab"] {
-            height: 34px;
-            border-radius: 6px;
-            padding: 0 14px;
-            font-weight: 600;
+            height: 38px;
+            border-radius: 4px 4px 0 0;
+            padding: 0 18px;
+            font-weight: 700;
             font-size: 0.85rem;
+            color: #475569;
+            background-color: #E2E8F0;
         }
         .stTabs [aria-selected="true"] {
-            background-color: #2563EB !important;
+            background-color: #FF6600 !important;
             color: #FFFFFF !important;
         }
-        
-        /* Reduce dividers & headers */
+
+        /* Form & Input Elements Styling */
+        div[data-testid="stForm"] {
+            background-color: #FFFFFF;
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+        }
+
+        /* Moneycontrol Orange Primary Buttons */
+        .stButton>button, .stFormSubmitButton>button {
+            background-color: #FF6600 !important;
+            color: #FFFFFF !important;
+            font-weight: 700 !important;
+            border: none !important;
+            border-radius: 4px !important;
+            padding: 0.4rem 1rem !important;
+            transition: all 0.2s ease-in-out;
+        }
+        .stButton>button:hover, .stFormSubmitButton>button:hover {
+            background-color: #E05500 !important;
+            box-shadow: 0 2px 6px rgba(255, 102, 0, 0.3);
+        }
+
+        /* Expander Header Styling */
+        .streamlit-expanderHeader {
+            font-weight: 700;
+            color: #1E222D;
+            background-color: #FFFFFF;
+            border-radius: 4px;
+            border: 1px solid #E2E8F0;
+        }
+
+        /* General Divider Overrides */
         hr {
             margin: 0.5rem 0 !important;
-        }
-        h2, h3 {
-            margin-top: 0.2rem !important;
-            margin-bottom: 0.4rem !important;
-            font-size: 1.1rem !important;
+            border-color: #E2E8F0 !important;
         }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# Header Display
+# Top Moneycontrol Header
 st.markdown(
     """
-    <div class="header-hero">
-        <h1>💼 Fixed Deposit Portfolio Manager</h1>
-        <p>Smart document extraction, structured tracking, and portfolio performance analytics.</p>
+    <div class="mc-header">
+        <div style="display: flex; align-items: center;">
+            <div class="mc-brand">moneycontrol <span>FD PORTFOLIO</span></div>
+            <div class="mc-subtext">Fixed Deposit Tracker &amp; Yield Analytics</div>
+        </div>
+        <div style="font-size: 0.8rem; color: #94A3B8; font-weight: 600;">
+            REAL-TIME PORTFOLIO TRACKER
+        </div>
     </div>
 """,
     unsafe_allow_html=True,
 )
 
-tab1, tab2 = st.tabs(["📊 View Portfolio", "📄 Scan & Add Certificate"])
+tab1, tab2 = st.tabs(["📊 VIEW PORTFOLIO", "📄 SCAN & ADD CERTIFICATE"])
 
 # --- TAB 1: PORTFOLIO & ANALYTICS ---
 with tab1:
@@ -437,10 +480,12 @@ with tab1:
     )
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total Deposits", total_deposits)
-    m2.metric("Total Principal", f"₹{total_principal:,.2f}")
-    m3.metric("Monthly Interest", f"₹{total_monthly_interest:,.2f}")
-    m4.metric("Weighted ROI", f"{weighted_rate:.2f}%")
+    m1.metric("TOTAL DEPOSITS", total_deposits)
+    m2.metric("TOTAL PRINCIPAL", f"₹{total_principal:,.2f}")
+    m3.metric("MONTHLY YIELD", f"₹{total_monthly_interest:,.2f}")
+    m4.metric("WEIGHTED ROI", f"{weighted_rate:.2f}%")
+
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
     df_display = (
         df.drop(columns=["nominee_name", "maturity_amount"])
@@ -459,7 +504,7 @@ with tab1:
         .round({"Monthly Interest (₹)": 2})
     )
 
-    # Height set to 210px (~5 rows + header). Adds vertical scrollbar if > 5 rows.
+    # Height cap at 210px ensures ~5 records visible, auto vertical scrollbar for >5
     st.dataframe(
         df_display,
         use_container_width=True,
@@ -495,9 +540,9 @@ with tab1:
 
     # EDIT RECORD
     with col_edit:
-      with st.expander("✏️ Update a Record"):
+      with st.expander("✏️ Update FD Record Details"):
         edit_id = st.number_input(
-            "Record ID to Edit",
+            "Select Record ID",
             min_value=int(df["id"].min()),
             max_value=int(df["id"].max()),
             step=1,
@@ -572,9 +617,9 @@ with tab1:
 
     # DELETE RECORD
     with col_del:
-      with st.expander("🗑️ Delete a Record"):
+      with st.expander("🗑️ Delete FD Record"):
         del_id = st.number_input(
-            "Record ID to delete", min_value=1, step=1, key="del_id_input"
+            "Select Record ID to Delete", min_value=1, step=1, key="del_id_input"
         )
         if st.button("Delete Record", use_container_width=True):
           c.execute("DELETE FROM fixed_deposits WHERE id = ?", (del_id,))

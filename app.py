@@ -590,10 +590,10 @@ with tab2:
                 "Institution", width="medium"
             ),
             "FD / Cert No.": st.column_config.TextColumn(
-                "FD / Cert No.", width="large"
+                "FD / Cert No.", width="medium"
             ),
             "Principal (₹)": st.column_config.NumberColumn(
-                "Principal (₹)", format="₹%,.2f", width="small"
+                "Principal (₹)", format="₹%,.2f", width="medium"
             ),
             "ROI (%)": st.column_config.NumberColumn(
                 "ROI (%)", format="%.2f%%", width="small"
@@ -602,7 +602,7 @@ with tab2:
                 "Maturity Date", width="small"
             ),
             "Monthly Interest (₹)": st.column_config.NumberColumn(
-                "Monthly Interest (₹)", format="₹%,.2f", width="small"
+                "Monthly Interest (₹)", format="₹%,.2f", width="large"
             ),
         },
     )

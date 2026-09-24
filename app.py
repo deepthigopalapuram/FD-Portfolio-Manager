@@ -577,7 +577,35 @@ with tab2:
         .round({"Monthly Interest (₹)": 2})
     )
 
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", width="small"),
+            "Holder Name": st.column_config.TextColumn(
+                "Holder Name", width="medium"
+            ),
+            "Institution": st.column_config.TextColumn(
+                "Institution", width="large"
+            ),
+            "FD / Cert No.": st.column_config.TextColumn(
+                "FD / Cert No.", width="medium"
+            ),
+            "Principal (₹)": st.column_config.NumberColumn(
+                "Principal (₹)", format="₹%,.2f", width="small"
+            ),
+            "ROI (%)": st.column_config.NumberColumn(
+                "ROI (%)", format="%.2f%%", width="small"
+            ),
+            "Maturity Date": st.column_config.TextColumn(
+                "Maturity Date", width="small"
+            ),
+            "Monthly Interest (₹)": st.column_config.NumberColumn(
+                "Monthly Interest (₹)", format="₹%,.2f", width="medium"
+            ),
+        },
+    )
 
     st.markdown("---")
     col_edit, col_del = st.columns(2, gap="large")

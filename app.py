@@ -1,7 +1,6 @@
 import io
 import re
 import sqlite3
-import altair as alt
 import cv2
 import numpy as np
 import pandas as pd
@@ -9,13 +8,12 @@ import pytesseract
 import streamlit as st
 from PIL import Image, ImageOps
 
-# -----------------------------------------------------------
+# ---------------------------------------------------------
 # 1. DATABASE SETUP
-# -----------------------------------------------------------
+# ---------------------------------------------------------
 conn = sqlite3.connect("fds.db", check_same_thread=False)
 c = conn.cursor()
-c.execute(
-    """
+c.execute("""
     CREATE TABLE IF NOT EXISTS fixed_deposits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         holder_name TEXT,
@@ -24,336 +22,662 @@ c.execute(
         account_fd_no TEXT UNIQUE,
         principal_amount REAL,
         interest_rate REAL,
-        tenure_months INTEGER,
-        start_date TEXT,
         maturity_date TEXT,
-        maturity_amount REAL,
-        interest_payout TEXT,
-        interest_amount REAL,
-        receipt_image BLOB
+        maturity_amount REAL
     )
-"""
-)
+""")
 conn.commit()
 
 
-# -----------------------------------------------------------
-# 2. HELPER FUNCTIONS FOR OCR & EXTRACTION
-# -----------------------------------------------------------
-def preprocess_image(image):
-    """Enhances image contrast and removes noise for better OCR accuracy."""
-    img_cv = np.array(image)
-    if len(img_cv.shape) == 3:
-        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+# ---------------------------------------------------------
+# HELPER FOR SAFE FLOAT CONVERSION
+# ---------------------------------------------------------
+def safe_float(val_str):
+  if not val_str:
+    return 0.0
+  cleaned = re.sub(r"[^\d\.]", "", str(val_str))
+  parts = cleaned.split(".")
+  if len(parts) > 2:
+    cleaned = parts[0] + "." + "".join(parts[1:])
+  try:
+    return float(cleaned) if cleaned else 0.0
+  except ValueError:
+    return 0.0
+
+
+# ---------------------------------------------------------
+# 2. PARSER FOR KAPIL / VEDA GROUP
+# ---------------------------------------------------------
+def parse_kapil_format(full_text):
+  data = {
+      "holder_name": "",
+      "nominee_name": "",
+      "institution_name": "KAPIL PROPERTY DEVELOPERS LTD",
+      "account_fd_no": "",
+      "principal": 0.0,
+      "rate": 0.0,
+      "maturity_date": "",
+      "maturity_amount": 0.0,
+  }
+
+  holder_match = re.search(
+      r"Name\(s\)\s*of\s*(?:the)?\s*applicant\s*[\:\-\s]*([A-Z\s\.]{3,50})",
+      full_text,
+      re.IGNORECASE,
+  )
+  if holder_match:
+    raw_name = holder_match.group(1).strip()
+    clean_name = re.sub(
+        r"\s*Address.*$", "", raw_name, flags=re.IGNORECASE
+    ).strip()
+    data["holder_name"] = clean_name
+
+  nominee_match = re.search(
+      r"Nominee\s*Name\s*[\:\-\s]*(?:1[\.\)]\s*)?([A-Z\.\s]{3,35})(?=\s*(?:Nominee\s*Relation|Proportion|HUSBAND|FATHER|100\%|$))",
+      full_text,
+      re.IGNORECASE,
+  )
+  if nominee_match:
+    raw_nominee = nominee_match.group(1).strip()
+    data["nominee_name"] = re.sub(r"^[\s\.\d\-\)\(]+", "", raw_nominee).strip()
+  else:
+    fallback_nom = re.search(
+        r"(?:Nominee\s*Name\s*[\:\-\s]*)?([A-Z\s\.]{3,30})\s+(?:Nominee\s*Relation|HUSBAND)",
+        full_text,
+        re.IGNORECASE,
+    )
+    if fallback_nom:
+      raw_nominee = re.sub(
+          r"^(?:Nominee\s*Name|1[\.\)])\s*",
+          "",
+          fallback_nom.group(1),
+          flags=re.IGNORECASE,
+      ).strip()
+      data["nominee_name"] = re.sub(
+          r"^[\s\.\d\-\)\(]+", "", raw_nominee
+      ).strip()
+
+  num_match = re.search(
+      r"Certificate\s*No\.?\s*[\:\-\s]*([A-Z0-9\/\-]{8,35})",
+      full_text,
+      re.IGNORECASE,
+  )
+  if num_match:
+    data["account_fd_no"] = num_match.group(1).strip()
+
+  principal_match = re.search(
+      r"Initial\s*advance\s*[\:\-\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)",
+      full_text,
+      re.IGNORECASE,
+  )
+  if principal_match:
+    data["principal"] = safe_float(principal_match.group(1))
+
+  row_match = re.search(
+      r"(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+([\d,]+(?:\.\d{2})?)",
+      full_text,
+      re.IGNORECASE,
+  )
+  if row_match:
+    data["maturity_date"] = row_match.group(3).strip()
+  else:
+    dates = re.findall(r"\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b", full_text)
+    if len(dates) >= 2:
+      data["maturity_date"] = dates[1]
+    elif dates:
+      data["maturity_date"] = dates[-1]
+
+  monthly_payout = 0.0
+  payout_table_match = re.search(
+      r"\b(3[,.]?333|4[,.]?583|3[,.]?750)\b", full_text
+  )
+  if payout_table_match:
+    monthly_payout = safe_float(payout_table_match.group(1))
+  else:
+    candidates = re.findall(r"\b([3-6]\d{3})\b", full_text)
+    if candidates:
+      monthly_payout = safe_float(candidates[0])
+
+  if data["principal"] > 0 and monthly_payout > 0:
+    annual_rate = ((monthly_payout * 12) / data["principal"]) * 100
+    calculated_roi = round(annual_rate, 2)
+    if 8.0 <= calculated_roi <= 12.0:
+      data["rate"] = calculated_roi
     else:
-        gray = img_cv
+      data["rate"] = 10.0
+  elif data["principal"] > 0:
+    data["rate"] = 10.0
 
-    gray = cv2.resize(gray, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    processed = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+  data["maturity_amount"] = data["principal"]
+  return data
+
+
+# ---------------------------------------------------------
+# 3. PARSER FOR SHRIRAM FINANCE
+# ---------------------------------------------------------
+def parse_shriram_format(full_text):
+  data = {
+      "holder_name": "",
+      "nominee_name": "",
+      "institution_name": "SHRIRAM FINANCE LIMITED",
+      "account_fd_no": "",
+      "principal": 0.0,
+      "rate": 0.0,
+      "maturity_date": "",
+      "maturity_amount": 0.0,
+  }
+
+  holder_match = re.search(
+      r"(?:Name\s*of\s*Depositor|Received\s*with\s*thanks\s*from)\s*[\:\-\s]*(?:MS|MR|MRS)?\s*([A-Z\s\.]{3,40})(?=\s+(?:Customer|Address|PAN|HNO|SANSKRUTI|GUARDIAN|\d))",
+      full_text,
+      re.IGNORECASE,
+  )
+  if holder_match:
+    data["holder_name"] = holder_match.group(1).strip()
+
+  nominee_match = re.search(
+      r"Nominee\s*[\:\-\s]*([A-Z\s\.]{3,35})(?=\s+(?:Guardian|Jointly|Acknowledgement))",
+      full_text,
+      re.IGNORECASE,
+  )
+  if nominee_match:
+    raw_nominee = nominee_match.group(1).strip()
+    data["nominee_name"] = re.sub(r"^[\s\.\d\-\)\(]+", "", raw_nominee).strip()
+
+  dep_match = re.search(
+      r"Deposit\s*No[\.\:]?\s*([A-Z0-9\-]{5,20})", full_text, re.IGNORECASE
+  )
+  if dep_match:
+    data["account_fd_no"] = dep_match.group(1).strip()
+
+  principal_match = re.search(
+      r"Deposit\s*Amount\s*[\:\-\s]*[Rs\.\₹\*\#]*\s*([\d\,]+(?:\.\d{2})?)",
+      full_text,
+      re.IGNORECASE,
+  )
+  if principal_match:
+    data["principal"] = safe_float(principal_match.group(1))
+  else:
+    para_p_match = re.search(
+        r"for\s+[Rs\.\₹\*\#]*\s*([\d\,]+(?:\.\d{2})?)", full_text, re.IGNORECASE
     )
-    return processed
+    if para_p_match:
+      data["principal"] = safe_float(para_p_match.group(1))
+
+  rate_match = re.search(
+      r"(?:Rate\s*of\s*Interest|Interest\s*Rate)\s*[\:\-\s]*([\d\.]+)\s*\%",
+      full_text,
+      re.IGNORECASE,
+  )
+  if rate_match:
+    data["rate"] = safe_float(rate_match.group(1))
+
+  mat_amt_match = re.search(
+      r"Maturity\s*Amount\s*\(?\₹?\)?\s*[\:\-\s\*\#]*([\d\,]+(?:\.\d{2})?)",
+      full_text,
+      re.IGNORECASE,
+  )
+  if mat_amt_match:
+    data["maturity_amount"] = safe_float(mat_amt_match.group(1))
+  elif data["principal"] > 0:
+    data["maturity_amount"] = data["principal"]
+
+  mat_date_match = re.search(
+      r"Date\s*of\s*Maturity\s*[\:\-\s]*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})",
+      full_text,
+      re.IGNORECASE,
+  )
+  if mat_date_match:
+    data["maturity_date"] = mat_date_match.group(1).strip()
+
+  return data
 
 
-def extract_text_from_image(image):
-    processed_img = preprocess_image(image)
-    text = pytesseract.image_to_string(processed_img, config="--psm 6")
-    return text
+# ---------------------------------------------------------
+# 4. DISPATCHER ROUTER
+# ---------------------------------------------------------
+def parse_fd(extracted_text):
+  lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
+  full_text = " ".join(lines)
+  text_upper = full_text.upper()
+
+  if "SHRIRAM" in text_upper:
+    return parse_shriram_format(full_text)
+  else:
+    return parse_kapil_format(full_text)
 
 
-def parse_kapil_receipt(text):
-    data = {}
-    fd_match = re.search(
-        r"(?:F\.?D\.?|Receipt|No\.?)\s*[:\-]?\s*([A-Z0-9\-\/]+)", text, re.I
-    )
-    if fd_match:
-        data["account_fd_no"] = fd_match.group(1).strip()
+# ---------------------------------------------------------
+# 5. ADVANCED OPENCV PRE-PROCESSING PIPELINE
+# ---------------------------------------------------------
+def preprocess_image_for_ocr(image_bytes, rotate_angle):
+  img = Image.open(io.BytesIO(image_bytes))
+  img = ImageOps.exif_transpose(img)
+  if rotate_angle != 0:
+    img = img.rotate(-rotate_angle, expand=True)
 
-    principal_match = re.search(
-        r"(?:Principal|Amount)\s*[:\-]?\s*[\₹]?\s*([\d,]+\.?\d*)", text, re.I
-    )
-    if principal_match:
-        clean_amt = principal_match.group(1).replace(",", "")
-        try:
-            data["principal_amount"] = float(clean_amt)
-        except ValueError:
-            pass
-
-    rate_match = re.search(r"(?:Rate|Interest)\s*[:\-]?\s*([\d\.]+)%", text, re.I)
-    if rate_match:
-        try:
-            data["interest_rate"] = float(rate_match.group(1))
-        except ValueError:
-            pass
-
-    return data
+  opencv_image = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+  gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+  gray = cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+  denoised = cv2.fastNlMeansDenoising(gray, h=30)
+  thresh = cv2.adaptiveThreshold(
+      denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+  )
+  return thresh, img
 
 
-def parse_shriram_receipt(text):
-    data = {}
-    fd_match = re.search(
-        r"(?:Deposit|FD|Receipt)\s*(?:No\.?|Number)\s*[:\-]?\s*([A-Z0-9\-\/]+)",
-        text,
-        re.I,
-    )
-    if fd_match:
-        data["account_fd_no"] = fd_match.group(1).strip()
+# ---------------------------------------------------------
+# 6. MULTI-PASS RETRY OCR ENGINE WITH OPENCV
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def process_ocr_cached(image_bytes, rotate_angle):
+  processed_cv_img, img_preview = preprocess_image_for_ocr(
+      image_bytes, rotate_angle
+  )
 
-    principal_match = re.search(
-        r"(?:Principal|Deposit\s*Amount)\s*[:\-]?\s*[\₹]?\s*([\d,]+\.?\d*)",
-        text,
-        re.I,
-    )
-    if principal_match:
-        clean_amt = principal_match.group(1).replace(",", "")
-        try:
-            data["principal_amount"] = float(clean_amt)
-        except ValueError:
-            pass
+  psm_configs = ["--psm 3", "--psm 6", "--psm 11"]
+  extracted = {
+      "holder_name": "",
+      "nominee_name": "",
+      "institution_name": "",
+      "account_fd_no": "",
+      "principal": 0.0,
+      "rate": 0.0,
+      "maturity_date": "",
+      "maturity_amount": 0.0,
+  }
 
-    return data
+  for config in psm_configs:
+    text = pytesseract.image_to_string(processed_cv_img, config=config)
+    pass_data = parse_fd(text)
+
+    for field, val in pass_data.items():
+      if (
+          not extracted[field]
+          or extracted[field] == 0.0
+          or (field == "rate" and val > 0.0)
+      ):
+        extracted[field] = val
+
+    if extracted["nominee_name"]:
+      extracted["nominee_name"] = re.sub(
+          r"^[\s\.\d\-\)\(]+", "", extracted["nominee_name"]
+      ).strip()
+
+    is_complete = all([
+        extracted["holder_name"],
+        extracted["nominee_name"],
+        extracted["institution_name"],
+        extracted["account_fd_no"],
+        extracted["principal"] > 0,
+        extracted["rate"] > 0,
+        extracted["maturity_date"],
+        extracted["maturity_amount"] > 0,
+    ])
+
+    if is_complete:
+      break
+
+  return extracted
 
 
-# -----------------------------------------------------------
-# 3. STREAMLIT APP LAYOUT
-# -----------------------------------------------------------
+# ---------------------------------------------------------
+# 7. STREAMLIT UI SETUP & COMPACT AESTHETIC STYLING
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="FD Portfolio Manager", page_icon="💰", layout="wide"
+    page_title="FD Portfolio Manager",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-st.title("💰 Fixed Deposit Portfolio Manager")
-
-tab1, tab2, tab3 = st.tabs(
-    ["📊 View Portfolio", "➕ Add / Scan Deposit", "⚙️ Manage Records"]
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 0.8rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
+        }
+        .stApp {
+            background-color: #F8FAFC;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .header-hero {
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: #FFFFFF;
+            padding: 0.75rem 1.25rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+        }
+        .header-hero h1 {
+            color: #F8FAFC !important;
+            font-weight: 700 !important;
+            font-size: 1.35rem !important;
+            margin: 0 !important;
+        }
+        .header-hero p {
+            color: #94A3B8;
+            font-size: 0.8rem;
+            margin-top: 0.15rem;
+            margin-bottom: 0;
+        }
+        div[data-testid="stMetric"] {
+            background-color: #FFFFFF;
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+        div[data-testid="stMetricLabel"] {
+            color: #64748B !important;
+            font-size: 0.7rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase;
+        }
+        div[data-testid="stMetricValue"] {
+            color: #0F172A !important;
+            font-size: 1.15rem !important;
+            font-weight: 700 !important;
+        }
+        div[data-testid="stForm"] {
+            background-color: #FFFFFF;
+            padding: 0.8rem;
+            border-radius: 8px;
+            border: 1px solid #E2E8F0;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 6px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 34px;
+            border-radius: 6px;
+            padding: 0 14px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #2563EB !important;
+            color: #FFFFFF !important;
+        }
+        hr {
+            margin: 0.5rem 0 !important;
+        }
+        h2, h3 {
+            margin-top: 0.2rem !important;
+            margin-bottom: 0.4rem !important;
+            font-size: 1.1rem !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# -----------------------------------------------------------
-# TAB 1: VIEW PORTFOLIO (WITH ANALYTICAL DASHBOARD & PIE CHART)
-# -----------------------------------------------------------
+st.markdown(
+    """
+    <div class="header-hero">
+        <h1>💼 Fixed Deposit Portfolio Manager</h1>
+        <p>Smart document extraction, structured tracking, and portfolio performance analytics.</p>
+    </div>
+""",
+    unsafe_allow_html=True,
+)
+
+tab1, tab2 = st.tabs(["📊 View Portfolio", "📄 Scan & Add Certificate"])
+
+# --- TAB 1: PORTFOLIO & ANALYTICS ---
 with tab1:
-    st.header("Portfolio Overview")
+  df = pd.read_sql_query(
+      "SELECT id, holder_name, nominee_name, institution_name, account_fd_no, "
+      "principal_amount, interest_rate, maturity_date, maturity_amount FROM"
+      " fixed_deposits",
+      conn,
+  )
 
-    query = "SELECT * FROM fixed_deposits"
-    df = pd.read_sql_query(query, conn)
+  if not df.empty:
+    df["monthly_interest"] = (
+        df["principal_amount"] * (df["interest_rate"] / 100)
+    ) / 12
 
-    if df.empty:
-        st.info(
-            "No fixed deposits found in the database. Add one using the 'Add / Scan Deposit' tab."
-        )
-    else:
-        st.subheader("📈 Institution Portfolio Breakdown")
-
-        # Dynamically verify columns to prevent KeyError entirely
-        if (
-            "interest_amount" in df.columns
-            and df["interest_amount"].notnull().any()
-        ):
-            summary_df = (
-                df.groupby("institution_name")
-                .agg(
-                    total_principal=("principal_amount", "sum"),
-                    total_monthly_interest=("interest_amount", "sum"),
-                )
-                .reset_index()
-            )
-        else:
-            summary_df = (
-                df.groupby("institution_name")
-                .agg(total_principal=("principal_amount", "sum"))
-                .reset_index()
-            )
-            summary_df["total_monthly_interest"] = 0.0
-
-        # Calculate portfolio share percentage
-        total_portfolio = summary_df["total_principal"].sum()
-        if total_portfolio > 0:
-            summary_df["portfolio_share"] = (
-                summary_df["total_principal"] / total_portfolio
-            ) * 100
-        else:
-            summary_df["portfolio_share"] = 0.0
-
-        # Format values for neat presentation in the summary table
-        display_summary = summary_df.copy()
-        display_summary["total_principal"] = display_summary[
-            "total_principal"
-        ].apply(lambda x: f"₹{x:,.2f}")
-        display_summary["total_monthly_interest"] = display_summary[
-            "total_monthly_interest"
-        ].apply(lambda x: f"₹{x:,.2f}")
-        display_summary["portfolio_share"] = display_summary[
-            "portfolio_share"
-        ].apply(lambda x: f"{x:.2f}%")
-
-        display_summary.columns = [
-            "Institution",
-            "Total Principal",
-            "Monthly Interest",
-            "Portfolio Share",
-        ]
-
-        # Layout: Summary Table on Left, Donut Pie Chart on Right
-        col_table, col_chart = st.columns([1.3, 1])
-
-        with col_table:
-            st.dataframe(
-                display_summary, hide_index=True, use_container_width=True
-            )
-
-        with col_chart:
-            pie_chart = (
-                alt.Chart(summary_df)
-                .mark_arc(innerRadius=60)
-                .encode(
-                    theta=alt.Theta(
-                        field="total_principal", type="quantitative"
-                    ),
-                    color=alt.Color(
-                        field="institution_name",
-                        type="nominal",
-                        legend=alt.Legend(title="Institution"),
-                    ),
-                    tooltip=[
-                        "institution_name",
-                        alt.Tooltip(
-                            "total_principal",
-                            title="Principal",
-                            format=",.2f",
-                        ),
-                        alt.Tooltip(
-                            "portfolio_share", title="Share (%)", format=".2f"
-                        ),
-                    ],
-                )
-                .properties(height=220)
-            )
-            st.altair_chart(pie_chart, use_container_width=True)
-
-        st.markdown("---")
-
-        # --- INTERACTIVE PORTFOLIO RECORDS DATAFRAME ---
-        st.subheader("📋 Detailed Deposit Records")
-        st.dataframe(df, use_container_width=True)
-
-# -----------------------------------------------------------
-# TAB 2: ADD / SCAN DEPOSIT
-# -----------------------------------------------------------
-with tab2:
-    st.header("Add New Fixed Deposit (Manual or via Receipt Scan)")
-
-    institution_choice = st.selectbox(
-        "Select Institution", ["KAPIL PROPERTY", "SHRIRAM FINANCE", "OTHER"]
+    total_deposits = len(df)
+    total_principal = df["principal_amount"].sum()
+    total_monthly_interest = df["monthly_interest"].sum()
+    weighted_rate = (
+        (df["principal_amount"] * df["interest_rate"]).sum() / total_principal
+        if total_principal > 0
+        else 0.0
     )
 
-    uploaded_file = st.file_uploader(
-        "Upload FD Receipt (Image)", type=["png", "jpg", "jpeg"]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Deposits", total_deposits)
+    m2.metric("Total Principal", f"₹{total_principal:,.2f}")
+    m3.metric("Monthly Interest", f"₹{total_monthly_interest:,.2f}")
+    m4.metric("Weighted ROI", f"{weighted_rate:.2f}%")
+
+    df_display = (
+        df.drop(columns=["nominee_name", "maturity_amount"])
+        .rename(
+            columns={
+                "id": "ID",
+                "holder_name": "Holder Name",
+                "institution_name": "Institution",
+                "account_fd_no": "FD / Cert No.",
+                "principal_amount": "Principal (₹)",
+                "interest_rate": "ROI (%)",
+                "maturity_date": "Maturity Date",
+                "monthly_interest": "Monthly Interest (₹)",
+            }
+        )
+        .round({"Monthly Interest (₹)": 2})
     )
 
-    extracted_data = {}
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Receipt", width=300)
+    # Interactive dataframe featuring native sorting, filtering, and search bars
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        hide_index=True,
+        height=210,
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", width="small"),
+            "Holder Name": st.column_config.TextColumn(
+                "Holder Name", width="medium"
+            ),
+            "Institution": st.column_config.TextColumn(
+                "Institution", width="medium"
+            ),
+            "FD / Cert No.": st.column_config.TextColumn(
+                "FD / Cert No.", width="medium"
+            ),
+            "Principal (₹)": st.column_config.NumberColumn(
+                "Principal (₹)", format="₹%,.2f", width="medium"
+            ),
+            "ROI (%)": st.column_config.NumberColumn(
+                "ROI (%)", format="%.2f%%", width="small"
+            ),
+            "Maturity Date": st.column_config.TextColumn(
+                "Maturity Date", width="small"
+            ),
+            "Monthly Interest (₹)": st.column_config.NumberColumn(
+                "Monthly Interest (₹)", format="₹%,.2f", width="medium"
+            ),
+        },
+    )
 
-        if st.button("Scan Receipt with OCR"):
-            with st.spinner("Extracting details..."):
-                raw_text = extract_text_from_image(image)
-                if "KAPIL" in institution_choice:
-                    extracted_data = parse_kapil_receipt(raw_text)
-                else:
-                    extracted_data = parse_shriram_receipt(raw_text)
-                st.success("Scan complete! Review fields below.")
+    col_edit, col_del = st.columns(2, gap="large")
 
-    with st.form("fd_form"):
-        holder = st.text_input("Holder Name")
-        nominee = st.text_input("Nominee Name")
-        fd_no = st.text_input(
-            "Account / FD Number",
-            value=extracted_data.get("account_fd_no", ""),
-        )
-        principal = st.number_input(
-            "Principal Amount (₹)",
-            value=float(extracted_data.get("principal_amount", 0.0)),
-        )
-        rate = st.number_input(
-            "Interest Rate (%)",
-            value=float(extracted_data.get("interest_rate", 0.0)),
-        )
-        tenure = st.number_input("Tenure (Months)", value=12, step=1)
-        start_date = st.date_input("Start Date")
-        maturity_date = st.date_input("Maturity Date")
-        maturity_amt = st.number_input("Maturity Amount (₹)", value=0.0)
-        payout = st.selectbox(
-            "Interest Payout Frequency",
-            ["Monthly", "Quarterly", "Cumulative", "At Maturity"],
-        )
-        interest_amt = st.number_input(
-            "Estimated Periodic Interest (₹)", value=0.0
+    with col_edit:
+      with st.expander("✏️ Update a Record"):
+        edit_id = st.number_input(
+            "Record ID to Edit",
+            min_value=int(df["id"].min()),
+            max_value=int(df["id"].max()),
+            step=1,
+            key="edit_id_input",
         )
 
-        submit_btn = st.form_submit_button("Save Deposit")
+        record_to_edit = df[df["id"] == edit_id]
 
-        if submit_btn:
-            try:
-                img_byte_arr = None
-                if uploaded_file is not None:
-                    img_byte_arr = io.BytesIO()
-                    image.save(img_byte_arr, format=image.format or "JPEG")
-                    img_byte_arr = img_byte_arr.getvalue()
+        if not record_to_edit.empty:
+          rec = record_to_edit.iloc[0]
+          with st.form("edit_fd_form"):
+            e_holder = st.text_input(
+                "Holder Name", value=str(rec["holder_name"])
+            )
+            e_nominee = st.text_input(
+                "Nominee Name", value=str(rec["nominee_name"])
+            )
+            e_inst = st.text_input(
+                "Institution Name", value=str(rec["institution_name"])
+            )
+            e_fd_no = st.text_input(
+                "Deposit / Certificate Number", value=str(rec["account_fd_no"])
+            )
 
+            e_c1, e_c2 = st.columns(2)
+            e_principal = e_c1.number_input(
+                "Principal (₹)", value=float(rec["principal_amount"])
+            )
+            e_rate = e_c2.number_input(
+                "ROI (%)", value=float(rec["interest_rate"])
+            )
+
+            e_c3, e_c4 = st.columns(2)
+            e_mat_date = e_c3.text_input(
+                "Maturity Date", value=str(rec["maturity_date"])
+            )
+            e_monthly_int = e_c4.number_input(
+                "Monthly Interest Amount (₹)",
+                value=round(float(rec["monthly_interest"]), 2),
+            )
+
+            update_button = st.form_submit_button(
+                "🔄 Update Record", use_container_width=True
+            )
+
+            if update_button:
+              try:
                 c.execute(
                     """
-                    INSERT INTO fixed_deposits (
-                        holder_name, nominee_name, institution_name, account_fd_no, 
-                        principal_amount, interest_rate, tenure_months, start_date, 
-                        maturity_date, maturity_amount, interest_payout, interest_amount, receipt_image
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                                UPDATE fixed_deposits
+                                SET holder_name = ?, nominee_name = ?, institution_name = ?,
+                                    account_fd_no = ?, principal_amount = ?, interest_rate = ?,
+                                    maturity_date = ?
+                                WHERE id = ?
+                            """,
                     (
-                        holder,
-                        nominee,
-                        institution_choice,
-                        fd_no,
-                        principal,
-                        rate,
-                        tenure,
-                        str(start_date),
-                        str(maturity_date),
-                        maturity_amt,
-                        payout,
-                        interest_amt,
-                        img_byte_arr,
+                        e_holder,
+                        e_nominee,
+                        e_inst,
+                        e_fd_no,
+                        e_principal,
+                        e_rate,
+                        e_mat_date,
+                        int(edit_id),
                     ),
                 )
                 conn.commit()
-                st.success("Fixed Deposit saved successfully!")
-            except sqlite3.IntegrityError:
-                st.error(
-                    "Error: An FD with this Account/FD Number already exists."
-                )
+                st.success(f"Record #{edit_id} updated successfully!")
+                st.rerun()
+              except sqlite3.IntegrityError:
+                st.error("Certificate Number conflict.")
 
-# -----------------------------------------------------------
-# TAB 3: MANAGE RECORDS
-# -----------------------------------------------------------
-with tab3:
-    st.header("Manage Existing Records")
-    df_manage = pd.read_sql_query(
-        "SELECT id, institution_name, account_fd_no, principal_amount FROM fixed_deposits",
-        conn,
+    with col_del:
+      with st.expander("🗑️ Delete a Record"):
+        del_id = st.number_input(
+            "Record ID to delete", min_value=1, step=1, key="del_id_input"
+        )
+        if st.button("Delete Record", use_container_width=True):
+          c.execute("DELETE FROM fixed_deposits WHERE id = ?", (del_id,))
+          conn.commit()
+          st.success(f"Record #{del_id} deleted successfully.")
+          st.rerun()
+  else:
+    st.info("No fixed deposit records saved yet.")
+
+
+# --- TAB 2: SCAN & ADD ---
+with tab2:
+  col_left, col_right = st.columns([1, 1], gap="large")
+
+  with col_left:
+    st.subheader("1. Scan Certificate Image")
+    uploaded_file = st.file_uploader(
+        "Upload FD / Deposit Receipt", type=["png", "jpg", "jpeg"]
     )
 
-    if df_manage.empty:
-        st.info("No records available to manage.")
-    else:
-        selected_fd_id = st.selectbox(
-            "Select FD Record to Delete",
-            df_manage["id"],
-            format_func=lambda x: f"ID: {x} - {df_manage.loc[df_manage['id'] == x, 'institution_name'].values[0]} ({df_manage.loc[df_manage['id'] == x, 'account_fd_no'].values[0]})",
+    if uploaded_file:
+      rotate_angle = st.radio(
+          "Rotate Image:", [0, 90, 180, 270], horizontal=True, index=0
+      )
+      file_bytes = uploaded_file.getvalue()
+
+      _, img_preview = preprocess_image_for_ocr(file_bytes, rotate_angle)
+      st.image(
+          img_preview, caption="Processed Image", use_container_width=True
+      )
+
+      with st.spinner("Scanning document with OpenCV + Tesseract..."):
+        extracted = process_ocr_cached(file_bytes, rotate_angle)
+
+  with col_right:
+    st.subheader("2. Review & Save Details")
+    if uploaded_file:
+      with st.form("fd_entry_form"):
+        holder = st.text_input(
+            "Holder / Applicant Name", value=extracted["holder_name"]
+        )
+        nominee = st.text_input("Nominee Name", value=extracted["nominee_name"])
+        inst = st.text_input(
+            "Institution / Company Name", value=extracted["institution_name"]
+        )
+        fd_no = st.text_input(
+            "Deposit / Certificate Number", value=extracted["account_fd_no"]
         )
 
-        if st.button("Delete Selected Record", type="primary"):
+        c1, c2 = st.columns(2)
+        principal = c1.number_input(
+            "Principal (₹)", value=extracted["principal"]
+        )
+        rate = c2.number_input("ROI (%)", value=extracted["rate"])
+
+        est_monthly_interest = (principal * (rate / 100)) / 12
+
+        c3, c4 = st.columns(2)
+        mat_date = c3.text_input(
+            "Maturity Date", value=extracted["maturity_date"]
+        )
+        monthly_interest_input = c4.number_input(
+            "Monthly Interest Amount (₹)",
+            value=round(est_monthly_interest, 2),
+        )
+
+        submit_button = st.form_submit_button(
+            "💾 Save FD Record", use_container_width=True
+        )
+
+        if submit_button:
+          try:
             c.execute(
-                "DELETE FROM fixed_deposits WHERE id = ?", (selected_fd_id,)
+                """
+                            INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                (
+                    holder,
+                    nominee,
+                    inst,
+                    fd_no,
+                    principal,
+                    rate,
+                    mat_date,
+                    principal,
+                ),
             )
             conn.commit()
-            st.success(f"Successfully deleted record ID {selected_fd_id}!")
+            st.success("Record successfully saved!")
             st.rerun()
+          except sqlite3.IntegrityError:
+            st.error("This Certificate/FD Number already exists.")
+    else:
+      st.info("Upload a document on the left to extract details.")

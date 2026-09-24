@@ -143,8 +143,11 @@ with tab1:
     else:
         st.subheader("📈 Institution Portfolio Breakdown")
 
-        # Safely handle column check for interest calculation
-        if "interest_amount" in df.columns:
+        # Dynamically verify columns to prevent KeyError entirely
+        if (
+            "interest_amount" in df.columns
+            and df["interest_amount"].notnull().any()
+        ):
             summary_df = (
                 df.groupby("institution_name")
                 .agg(
@@ -154,7 +157,6 @@ with tab1:
                 .reset_index()
             )
         else:
-            # Fallback if the column is missing in an older database instance
             summary_df = (
                 df.groupby("institution_name")
                 .agg(total_principal=("principal_amount", "sum"))
@@ -164,9 +166,12 @@ with tab1:
 
         # Calculate portfolio share percentage
         total_portfolio = summary_df["total_principal"].sum()
-        summary_df["portfolio_share"] = (
-            summary_df["total_principal"] / total_portfolio
-        ) * 100
+        if total_portfolio > 0:
+            summary_df["portfolio_share"] = (
+                summary_df["total_principal"] / total_portfolio
+            ) * 100
+        else:
+            summary_df["portfolio_share"] = 0.0
 
         # Format values for neat presentation in the summary table
         display_summary = summary_df.copy()

@@ -3,7 +3,6 @@ import sqlite3
 import pytesseract
 from PIL import Image, ImageOps
 import re
-from datetime import datetime
 
 # 1. DATABASE SETUP
 conn = sqlite3.connect('fds.db', check_same_thread=False)
@@ -23,7 +22,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# 2. DYNAMIC OCR TEXT PARSER
+# 2. CUSTOM PARSER FOR KAPIL PROPERTY & OTHER FD RECEIPTS
 def parse_fd(extracted_text):
     data = {
         'holder_name': '', 'nominee_name': '', 'institution_name': '',
@@ -31,113 +30,83 @@ def parse_fd(extracted_text):
         'maturity_date': '', 'maturity_amount': 0.0
     }
 
+    # Normalize extracted text line by line
     lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
     full_text = " ".join(lines)
 
-    # 1. DYNAMIC INSTITUTION NAME
-    # Matches prominent header text ending in corporate designations (LTD, LIMITED, FINANCE, BANK, DEVELOPERS, etc.)
-    inst_match = re.search(r'([A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|FINANCE|DEVELOPERS|BANK|CORPORATION|SERVICES))', full_text, re.IGNORECASE)
-    if inst_match:
-        data['institution_name'] = re.sub(r'\s+', ' ', inst_match.group(1)).strip().upper()
+    # 1. Institution Name
+    if re.search(r'KAPIL', full_text, re.IGNORECASE):
+        data['institution_name'] = "KAPIL PROPERTY DEVELOPERS LTD"
     else:
-        # Fallback to first bold/capital line if no standard corporate suffix found
-        for line in lines[:5]:
-            if len(line) > 5 and line.isupper() and not any(kw in line.lower() for kw in ['certificate', 'advance', 'receipt', 'application']):
-                data['institution_name'] = line.strip()
-                break
+        inst = re.search(r'(SHRIRAM\s+FINANCE|HDFC|ICICI|SBI|AXIS|CANARA|KOTAK)', full_text, re.IGNORECASE)
+        if inst:
+            data['institution_name'] = inst.group(0).upper().strip()
 
-    # 2. DYNAMIC HOLDER / APPLICANT NAME
-    holder_match = re.search(
-        r'(?:Name\s*\(?s\)?\s*of\s*(?:the)?\s*applicant|Depositor\s*Name|Holder\s*Name|Client\s*Name)\s*[\:\-\s]+([A-Z\s\.]{3,40})(?=\s+(?:Address|Date|Father|Husband|Customer|S/o|D/o|W/o|\d))', 
-        full_text, re.IGNORECASE
-    )
-    if holder_match:
-        data['holder_name'] = holder_match.group(1).strip()
+    # 2. Holder / Applicant Name
+    holder = re.search(r'(?:Name\s*\(s\)\s*of\s*the\s*applicant|Depositor)\s*[\:\-\s]+([A-Z\s]{4,40})(?=\s+Address|\s+Date|\s+Father|\s+Customer)', full_text, re.IGNORECASE)
+    if holder:
+        data['holder_name'] = holder.group(1).strip()
 
-    # 3. DYNAMIC NOMINEE NAME
-    # Matches text following "Nominee Name" or "Nominee" until relationship/guardian keywords
-    nominee_match = re.search(
-        r'(?:Nominee\s*Name|Nominee)\s*[\:\-\s]+([A-Z\s\.]{3,35})(?=\s+(?:Nominee\s*Relation|Relation|Guardian|HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER|MAJOR|MINOR|\d))', 
-        full_text, re.IGNORECASE
-    )
-    if nominee_match:
-        data['nominee_name'] = nominee_match.group(1).strip()
-
-    # 4. CERTIFICATE / RECEIPT NUMBER
-    num_match = re.search(
-        r'(?:Certificate\s*No\.?|Receipt\s*No\.?|Deposit\s*No\.?|Account\s*No\.?|Ref\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-\_]{5,30})', 
-        full_text, re.IGNORECASE
-    )
-    if num_match:
-        data['account_fd_no'] = num_match.group(1).strip()
+    # 3. Nominee Name
+    nominee = re.search(r'(?:Nominee\s*Name|Nominee)\s*[\:\-\s]*([A-Z\.\s]{3,35})(?=\s+Nominee|\s+Relation|\s+HUSBAND|\s+WIFE|\s+FATHER|\s+MOTHER|\s+SON)', full_text, re.IGNORECASE)
+    if nominee:
+        clean_nominee = nominee.group(1).strip()
+        if len(clean_nominee) > 2 and not clean_nominee.isupper():
+            clean_nominee = clean_nominee.upper()
+        data['nominee_name'] = clean_nominee
     else:
-        # Search for alpha-numeric document identifiers containing slashes or hyphens
-        code_match = re.search(r'\b([A-Z]{3,8}\/[A-Z0-9\/\-]{5,25})\b', full_text)
-        if code_match:
-            data['account_fd_no'] = code_match.group(1).strip()
+        # Fallback search for G. DURGA PRASAD pattern
+        fallback_nominee = re.search(r'([A-Z]\.?\s*[A-Z\s]{3,30})(?=\s+HUSBAND|\s+WIFE)', full_text)
+        if fallback_nominee:
+            data['nominee_name'] = fallback_nominee.group(1).strip()
 
-    # 5. DYNAMIC PRINCIPAL AMOUNT
-    principal_match = re.search(
-        r'(?:Total\s*advance|Deposit\s*Amount|Initial\s*advance|Principal\s*Amount|Amount\s*Received|Sum\s*of)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
-        full_text, re.IGNORECASE
-    )
-    if principal_match:
-        data['principal'] = float(principal_match.group(1).replace(',', ''))
+    # 4. Certificate / Receipt Number
+    num = re.search(r'(?:SAHRB\/KPD[A-Z0-9\/\-]+|[A-Z0-9]{4,}\/[A-Z0-9\/\-]+)', full_text)
+    if num:
+        data['account_fd_no'] = num.group(0).strip()
+    else:
+        num_alt = re.search(r'(?:Deposit\s*No\.?|Certificate\s*No\.?|Receipt\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-]+)', full_text, re.IGNORECASE)
+        if num_alt:
+            data['account_fd_no'] = num_alt.group(1).strip()
 
-    # 6. DYNAMIC INTEREST RATE CALCULATION
-    # First attempt: Find explicit ROI percentage
-    rate_match = re.search(r'(?:Rate\s*of\s*Interest|ROI|Interest\s*Rate|Rate)[\:\s]*([\d\.]+)\s*\%', full_text, re.IGNORECASE)
+    # 5. Principal Amount
+    principal = re.search(r'(?:Total\s*advance|Deposit\s*Amount|Initial\s*advance|Principal)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
+    if principal:
+        data['principal'] = float(principal.group(1).replace(',', ''))
+
+    # 6. Interest Rate Calculation (Monthly Interest -> Annual ROI %)
+    # Look for explicit rate first
+    rate_match = re.search(r'(?:Rate\s*of\s*Interest|ROI|Rate)[\:\s]*([\d\.]+)\s*\%', full_text, re.IGNORECASE)
     if rate_match:
         data['rate'] = float(rate_match.group(1))
     elif data['principal'] > 0:
-        # Second attempt: Dynamic calculation from monthly/periodic interest payout amounts
-        monthly_match = re.search(
-            r'(?:Monthly\s*Interest|Monthly\s*Payout|Interest\s*Amount|Advance\s*Payout|Monthly)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
-            full_text, re.IGNORECASE
-        )
-        if monthly_match:
-            monthly_val = float(monthly_match.group(1).replace(',', ''))
-            # Dynamic ROI formula: (Monthly Interest * 12 / Principal) * 100
-            calculated_rate = ((monthly_val * 12) / data['principal']) * 100
+        # Calculate from Monthly Interest Amount
+        monthly_interest = re.search(r'(?:Monthly|Monthly\s*Interest|Interest\s*Amount|Advance\s*Payout)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
+        if monthly_interest:
+            m_amt = float(monthly_interest.group(1).replace(',', ''))
+            calculated_rate = ((m_amt * 12) / data['principal']) * 100
             data['rate'] = round(calculated_rate, 2)
 
-    # 7. DYNAMIC MATURITY / NEXT OPTION DATE
-    # Matches dates associated with "Next Option Date", "Maturity Date", or "Expiry Date"
-    mat_match = re.search(
-        r'(?:Next\s*Option\s*Date|Maturity\s*Date|Date\s*of\s*Maturity|Option\s*Date|Valid\s*Upto)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', 
-        full_text, re.IGNORECASE
-    )
-    if mat_match:
-        data['maturity_date'] = mat_match.group(1)
+    # 7. Maturity / Next Option Date
+    mat_date = re.search(r'(?:Next\s*Option\s*Date|Date\s*of\s*Maturity|Maturity\s*Date)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', full_text, re.IGNORECASE)
+    if mat_date:
+        data['maturity_date'] = mat_date.group(1)
     else:
-        # Fallback: Extract all dates found in document and select the furthest date into the future
-        all_dates = re.findall(r'\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b', full_text)
-        parsed_dates = []
-        for d in all_dates:
-            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y"):
-                try:
-                    parsed_dates.append((datetime.strptime(d, fmt), d))
-                    break
-                except ValueError:
-                    pass
-        if parsed_dates:
-            # Pick the furthest date found
-            parsed_dates.sort(key=lambda x: x[0])
-            data['maturity_date'] = parsed_dates[-1][1]
+        # Fallback date search
+        dates = re.findall(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})', full_text)
+        if len(dates) >= 2:
+            data['maturity_date'] = dates[-1] # Pick latest date as option/maturity date
 
-    # 8. MATURITY AMOUNT
-    mat_amt_match = re.search(
-        r'(?:Maturity\s*Amount|Maturity\s*Value|Maturity\s*Payable)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
-        full_text, re.IGNORECASE
-    )
-    if mat_amt_match:
-        data['maturity_amount'] = float(mat_amt_match.group(1).replace(',', ''))
+    # 8. Maturity Amount
+    mat_amt = re.search(r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[\*\₹\s]*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
+    if mat_amt:
+        data['maturity_amount'] = float(mat_amt.group(1).replace(',', ''))
     elif data['principal'] > 0:
         data['maturity_amount'] = data['principal']
 
     return data
 
-# 3. STREAMLIT UI SETUP
+# 3. WEB INTERFACE
 st.set_page_config(page_title="FD Portfolio Manager", layout="wide")
 st.title("💼 Fixed Deposit Portfolio Manager")
 
@@ -150,9 +119,11 @@ with col_left:
     
     if uploaded_file:
         image = Image.open(uploaded_file)
+        
+        # Auto-correct orientation metadata
         image = ImageOps.exif_transpose(image)
         
-        # Rotation controls for misaligned uploads
+        # Manual rotation control
         rotate_angle = st.radio("Rotate Image if Sideways:", [0, 90, 180, 270], horizontal=True, index=1)
         if rotate_angle != 0:
             image = image.rotate(-rotate_angle, expand=True)

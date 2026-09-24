@@ -1,6 +1,8 @@
 import io
 import re
 import sqlite3
+import cv2
+import numpy as np
 import pandas as pd
 import pytesseract
 import streamlit as st
@@ -111,7 +113,6 @@ def parse_kapil_format(full_text):
   if principal_match:
     data["principal"] = safe_float(principal_match.group(1))
 
-  # Updated row match to capture the Next Option Date (Group 3)
   row_match = re.search(
       r"(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+([\d,]+(?:\.\d{2})?)",
       full_text,
@@ -127,7 +128,9 @@ def parse_kapil_format(full_text):
       data["maturity_date"] = dates[-1]
 
   monthly_payout = 0.0
-  payout_table_match = re.search(r"\b(3[,.]?333|4[,.]?583|3[,.]?750)\b", full_text)
+  payout_table_match = re.search(
+      r"\b(3[,.]?333|4[,.]?583|3[,.]?750)\b", full_text
+  )
   if payout_table_match:
     monthly_payout = safe_float(payout_table_match.group(1))
   else:
@@ -245,14 +248,32 @@ def parse_fd(extracted_text):
 
 
 # ---------------------------------------------------------
-# 5. MULTI-PASS RETRY OCR ENGINE
+# 5. ADVANCED OPENCV PRE-PROCESSING PIPELINE
 # ---------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def process_ocr_cached(image_bytes, rotate_angle):
+def preprocess_image_for_ocr(image_bytes, rotate_angle):
   img = Image.open(io.BytesIO(image_bytes))
   img = ImageOps.exif_transpose(img)
   if rotate_angle != 0:
     img = img.rotate(-rotate_angle, expand=True)
+
+  opencv_image = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+  gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+  gray = cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+  denoised = cv2.fastNlMeansDenoising(gray, h=30)
+  thresh = cv2.adaptiveThreshold(
+      denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+  )
+  return thresh, img
+
+
+# ---------------------------------------------------------
+# 6. MULTI-PASS RETRY OCR ENGINE WITH OPENCV
+# ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def process_ocr_cached(image_bytes, rotate_angle):
+  processed_cv_img, img_preview = preprocess_image_for_ocr(
+      image_bytes, rotate_angle
+  )
 
   psm_configs = ["--psm 3", "--psm 6", "--psm 11"]
   extracted = {
@@ -267,7 +288,7 @@ def process_ocr_cached(image_bytes, rotate_angle):
   }
 
   for config in psm_configs:
-    text = pytesseract.image_to_string(img, config=config)
+    text = pytesseract.image_to_string(processed_cv_img, config=config)
     pass_data = parse_fd(text)
 
     for field, val in pass_data.items():
@@ -301,7 +322,7 @@ def process_ocr_cached(image_bytes, rotate_angle):
 
 
 # ---------------------------------------------------------
-# 6. STREAMLIT UI SETUP & COMPACT AESTHETIC STYLING
+# 7. STREAMLIT UI SETUP & COMPACT AESTHETIC STYLING
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="FD Portfolio Manager",
@@ -589,15 +610,14 @@ with tab2:
           "Rotate Image:", [0, 90, 180, 270], horizontal=True, index=0
       )
       file_bytes = uploaded_file.getvalue()
-      img_preview = Image.open(io.BytesIO(file_bytes))
-      img_preview = ImageOps.exif_transpose(img_preview)
-      if rotate_angle != 0:
-        img_preview = img_preview.rotate(-rotate_angle, expand=True)
+
+      # Preview image handling using preprocessor helper
+      _, img_preview = preprocess_image_for_ocr(file_bytes, rotate_angle)
       st.image(
           img_preview, caption="Processed Image", use_container_width=True
       )
 
-      with st.spinner("Scanning document..."):
+      with st.spinner("Scanning document with OpenCV + Tesseract..."):
         extracted = process_ocr_cached(file_bytes, rotate_angle)
 
   with col_right:

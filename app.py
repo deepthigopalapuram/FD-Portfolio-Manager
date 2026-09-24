@@ -407,7 +407,6 @@ with tab1:
 with tab2:
   st.subheader("📊 Fixed Deposit Portfolio Analytics")
 
-  # Load database records explicitly into a Pandas DataFrame
   df = pd.read_sql_query(
       "SELECT id, holder_name, nominee_name, institution_name, account_fd_no, "
       "principal_amount, interest_rate, maturity_date, maturity_amount FROM"
@@ -416,7 +415,6 @@ with tab2:
   )
 
   if not df.empty:
-    # Summary KPI Calculations
     total_deposits = len(df)
     total_principal = df["principal_amount"].sum()
     total_maturity = df["maturity_amount"].sum()
@@ -426,7 +424,6 @@ with tab2:
         else 0.0
     )
 
-    # Metric Cards Display
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Deposits", total_deposits)
     m2.metric("Total Principal Invested", f"₹{total_principal:,.2f}")
@@ -436,7 +433,6 @@ with tab2:
     st.markdown("---")
     st.subheader("📋 All Saved Records")
 
-    # Explicit column name mapping ensures proper alignment
     df_display = df.rename(
         columns={
             "id": "ID",
@@ -451,17 +447,104 @@ with tab2:
         }
     )
 
-    # Render table with index hidden
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-    # Delete Record Section
-    with st.expander("🗑️ Delete a Record"):
-      del_id = st.number_input("Enter Record ID to delete", min_value=1, step=1)
-      if st.button("Delete Record"):
-        c.execute("DELETE FROM fixed_deposits WHERE id = ?", (del_id,))
-        conn.commit()
-        st.success(f"Record #{del_id} deleted successfully.")
-        st.rerun()
+    st.markdown("---")
+    col_edit, col_del = st.columns(2, gap="large")
+
+    # --- EDIT & UPDATE RECORD ---
+    with col_edit:
+      with st.expander("✏️ Update a Record"):
+        edit_id = st.number_input(
+            "Select Record ID to Edit",
+            min_value=int(df["id"].min()),
+            max_value=int(df["id"].max()),
+            step=1,
+            key="edit_id_input",
+        )
+
+        record_to_edit = df[df["id"] == edit_id]
+
+        if not record_to_edit.empty:
+          rec = record_to_edit.iloc[0]
+          with st.form("edit_fd_form"):
+            e_holder = st.text_input(
+                "Holder Name", value=str(rec["holder_name"])
+            )
+            e_nominee = st.text_input(
+                "Nominee Name", value=str(rec["nominee_name"])
+            )
+            e_inst = st.text_input(
+                "Institution Name", value=str(rec["institution_name"])
+            )
+            e_fd_no = st.text_input(
+                "Deposit / Certificate Number", value=str(rec["account_fd_no"])
+            )
+
+            e_c1, e_c2 = st.columns(2)
+            e_principal = e_c1.number_input(
+                "Principal (₹)", value=float(rec["principal_amount"])
+            )
+            e_rate = e_c2.number_input(
+                "ROI (%)", value=float(rec["interest_rate"])
+            )
+
+            e_c3, e_c4 = st.columns(2)
+            e_mat_date = e_c3.text_input(
+                "Maturity Date", value=str(rec["maturity_date"])
+            )
+            e_mat_amt = e_c4.number_input(
+                "Maturity Amount (₹)", value=float(rec["maturity_amount"])
+            )
+
+            update_button = st.form_submit_button(
+                "🔄 Update Record", use_container_width=True
+            )
+
+            if update_button:
+              try:
+                c.execute(
+                    """
+                                UPDATE fixed_deposits
+                                SET holder_name = ?, nominee_name = ?, institution_name = ?,
+                                    account_fd_no = ?, principal_amount = ?, interest_rate = ?,
+                                    maturity_date = ?, maturity_amount = ?
+                                WHERE id = ?
+                            """,
+                    (
+                        e_holder,
+                        e_nominee,
+                        e_inst,
+                        e_fd_no,
+                        e_principal,
+                        e_rate,
+                        e_mat_date,
+                        e_mat_amt,
+                        int(edit_id),
+                    ),
+                )
+                conn.commit()
+                st.success(f"Record #{edit_id} updated successfully!")
+                st.rerun()
+              except sqlite3.IntegrityError:
+                st.error(
+                    "Certificate Number conflict. Another record already has"
+                    " this certificate number."
+                )
+        else:
+          st.warning(f"No record found with ID {edit_id}")
+
+    # --- DELETE RECORD ---
+    with col_del:
+      with st.expander("🗑️ Delete a Record"):
+        del_id = st.number_input(
+            "Enter Record ID to delete", min_value=1, step=1, key="del_id_input"
+        )
+        if st.button("Delete Record", use_container_width=True):
+          c.execute("DELETE FROM fixed_deposits WHERE id = ?", (del_id,))
+          conn.commit()
+          st.success(f"Record #{del_id} deleted successfully.")
+          st.rerun()
   else:
     st.info(
         "No fixed deposit records saved yet. Use Tab 1 to scan and add records."

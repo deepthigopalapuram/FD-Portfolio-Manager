@@ -306,16 +306,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Custom CSS for Single-Page Compact Fit
+# Custom CSS for Single-Page Ultra-Compact Fit
 st.markdown(
     """
     <style>
         /* Compact Page Layout & Margins */
         .block-container {
-            padding-top: 1rem !important;
-            padding-bottom: 1rem !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
+            padding-top: 0.8rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
         }
         .stApp {
             background-color: #F8FAFC;
@@ -326,60 +326,60 @@ st.markdown(
         .header-hero {
             background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
             color: #FFFFFF;
-            padding: 1rem 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 1rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
             box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
         }
         .header-hero h1 {
             color: #F8FAFC !important;
             font-weight: 700 !important;
-            font-size: 1.5rem !important;
+            font-size: 1.35rem !important;
             margin: 0 !important;
         }
         .header-hero p {
             color: #94A3B8;
-            font-size: 0.85rem;
-            margin-top: 0.25rem;
+            font-size: 0.8rem;
+            margin-top: 0.15rem;
             margin-bottom: 0;
         }
 
         /* Compact Metric Cards */
         div[data-testid="stMetric"] {
             background-color: #FFFFFF;
-            padding: 0.6rem 1rem;
+            padding: 0.4rem 0.8rem;
             border-radius: 8px;
             border: 1px solid #E2E8F0;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
         }
         div[data-testid="stMetricLabel"] {
             color: #64748B !important;
-            font-size: 0.75rem !important;
+            font-size: 0.7rem !important;
             font-weight: 600 !important;
             text-transform: uppercase;
         }
         div[data-testid="stMetricValue"] {
             color: #0F172A !important;
-            font-size: 1.25rem !important;
+            font-size: 1.15rem !important;
             font-weight: 700 !important;
         }
 
         /* Form & Tab Spacing */
         div[data-testid="stForm"] {
             background-color: #FFFFFF;
-            padding: 1rem;
-            border-radius: 10px;
+            padding: 0.8rem;
+            border-radius: 8px;
             border: 1px solid #E2E8F0;
         }
         .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
+            gap: 6px;
         }
         .stTabs [data-baseweb="tab"] {
-            height: 38px;
+            height: 34px;
             border-radius: 6px;
-            padding: 0 16px;
+            padding: 0 14px;
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
         .stTabs [aria-selected="true"] {
             background-color: #2563EB !important;
@@ -388,11 +388,12 @@ st.markdown(
         
         /* Reduce dividers & headers */
         hr {
-            margin: 0.75rem 0 !important;
+            margin: 0.5rem 0 !important;
         }
         h2, h3 {
-            margin-top: 0.25rem !important;
-            margin-bottom: 0.5rem !important;
+            margin-top: 0.2rem !important;
+            margin-bottom: 0.4rem !important;
+            font-size: 1.1rem !important;
         }
     </style>
     """,
@@ -458,12 +459,12 @@ with tab1:
         .round({"Monthly Interest (₹)": 2})
     )
 
-    # Height set to 380px (~10 rows). Adds vertical scrollbar if > 10 rows.
+    # Height set to 210px (~5 rows + header). Adds vertical scrollbar if > 5 rows.
     st.dataframe(
         df_display,
         use_container_width=True,
         hide_index=True,
-        height=380,
+        height=210,
         column_config={
             "ID": st.column_config.NumberColumn("ID", width="small"),
             "Holder Name": st.column_config.TextColumn(

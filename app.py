@@ -298,10 +298,130 @@ def process_ocr_cached(image_bytes, rotate_angle):
 
 
 # ---------------------------------------------------------
-# 6. STREAMLIT UI SETUP & NAVIGATION TABS
+# 6. STREAMLIT UI SETUP & AESTHETIC STYLING
 # ---------------------------------------------------------
-st.set_page_config(page_title="FD Portfolio Manager", layout="wide")
-st.title("💼 Fixed Deposit Portfolio Manager")
+st.set_page_config(
+    page_title="FD Portfolio Manager",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Custom CSS for Modern, Professional Aesthetic UI
+st.markdown(
+    """
+    <style>
+        /* Base Page Background & Font */
+        .stApp {
+            background-color: #F8FAFC;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        /* Custom Header Hero */
+        .header-hero {
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            color: #FFFFFF;
+            padding: 2rem 2.5rem;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15);
+        }
+        .header-hero h1 {
+            color: #F8FAFC !important;
+            font-weight: 700 !important;
+            font-size: 2.2rem !important;
+            margin: 0 !important;
+            letter-spacing: -0.02em;
+        }
+        .header-hero p {
+            color: #94A3B8;
+            font-size: 1rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0;
+        }
+
+        /* Metric Cards Styling */
+        div[data-testid="stMetric"] {
+            background-color: #FFFFFF;
+            padding: 1.25rem 1.5rem;
+            border-radius: 12px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+        }
+        div[data-testid="stMetricLabel"] {
+            color: #64748B !important;
+            font-size: 0.875rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        div[data-testid="stMetricValue"] {
+            color: #0F172A !important;
+            font-size: 1.75rem !important;
+            font-weight: 700 !important;
+        }
+
+        /* Form & Card Containers */
+        div[data-testid="stForm"] {
+            background-color: #FFFFFF;
+            padding: 2rem;
+            border-radius: 14px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+        }
+
+        /* Buttons Styling */
+        .stButton>button {
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        /* Tab Navigation Styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 12px;
+            background-color: transparent;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 48px;
+            border-radius: 8px;
+            padding: 0 20px;
+            background-color: #E2E8F0;
+            color: #475569;
+            font-weight: 600;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #2563EB !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Expander Styling */
+        .streamlit-expanderHeader {
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E2E8F0;
+            font-weight: 600;
+            color: #1E293B;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Header Display
+st.markdown(
+    """
+    <div class="header-hero">
+        <h1>💼 Fixed Deposit Portfolio Manager</h1>
+        <p>Smart document extraction, structured tracking, and portfolio performance analytics.</p>
+    </div>
+""",
+    unsafe_allow_html=True,
+)
 
 tab1, tab2 = st.tabs(["📄 Scan & Add Certificate", "📊 View Portfolio"])
 
@@ -360,7 +480,6 @@ with tab1:
             "Interest Rate / ROI (%)", value=extracted["rate"]
         )
 
-        # Calculate estimated monthly interest for preview
         est_monthly_interest = (principal * (rate / 100)) / 12
 
         c3, c4 = st.columns(2)
@@ -378,7 +497,6 @@ with tab1:
 
         if submit_button:
           try:
-            # Note: Storing standard principal in maturity_amount slot for schema consistency
             c.execute(
                 """
                             INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
@@ -420,7 +538,6 @@ with tab2:
   )
 
   if not df.empty:
-    # Compute monthly interest per row: (Principal * (Rate / 100)) / 12
     df["monthly_interest"] = (
         df["principal_amount"] * (df["interest_rate"] / 100)
     ) / 12
@@ -443,7 +560,6 @@ with tab2:
     st.markdown("---")
     st.subheader("📋 All Saved Records")
 
-    # Format table to display Monthly Interest instead of Maturity Amount
     df_display = (
         df.drop(columns=["nominee_name", "maturity_amount"])
         .rename(

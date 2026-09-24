@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageOps
 import re
 
 # 1. DATABASE SETUP
@@ -22,7 +22,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# 2. OCR TEXT PARSER
+# 2. ENHANCED OCR TEXT PARSER
 def parse_fd(extracted_text):
     data = {
         'holder_name': '', 'nominee_name': '', 'institution_name': '',
@@ -30,29 +30,48 @@ def parse_fd(extracted_text):
         'maturity_date': '', 'maturity_amount': 0.0
     }
 
-    inst = re.search(r'(KAPIL\s+PROPERTY\s+DEVELOPERS|SHRIRAM\s+FINANCE|HDFC|ICICI|SBI|AXIS|CANARA|KOTAK)', extracted_text, re.IGNORECASE)
-    if inst: data['institution_name'] = inst.group(0).upper()
+    # 1. Institution Name
+    inst = re.search(r'(KAPIL\s+PROPERTY\s+DEVELOPERS(?:\s+LTD)?|SHRIRAM\s+FINANCE|HDFC|ICICI|SBI|AXIS|CANARA|KOTAK)', extracted_text, re.IGNORECASE)
+    if inst:
+        data['institution_name'] = inst.group(0).upper().strip()
+    else:
+        if "KAPIL" in extracted_text.upper():
+            data['institution_name'] = "KAPIL PROPERTY DEVELOPERS LTD"
 
-    holder = re.search(r'(?:Depositor|applicant)\s*[\:\-\s]+([A-Z\s]{4,35})(?=\s+Address|\s+Date|\s+Father|\s+Customer|\s+PAN)', extracted_text)
-    if holder: data['holder_name'] = holder.group(1).strip()
+    # 2. Holder Name
+    holder = re.search(r'(?:Name\([s]?\)\s*of\s*the\s*applicant|Depositor)\s*[\:\-\s]+([A-Z\s]{4,40})(?=\s+Address|\s+Date|\s+Father|\s+Customer)', extracted_text, re.IGNORECASE)
+    if holder:
+        data['holder_name'] = holder.group(1).strip()
 
-    nominee = re.search(r'Nominee\s*(?:Name)?\s*[\:\-\s]+([A-Z\s]{4,35})(?=\s+Nominee|\s+Proportion|\s+Guardian)', extracted_text, re.IGNORECASE)
-    if nominee: data['nominee_name'] = nominee.group(1).strip()
+    # 3. Nominee Name
+    nominee = re.search(r'Nominee\s*Name\s*[\:\-\s]+([A-Z\s]{4,40})(?=\s+Nominee\s*Relation|\s+Proportion|\s+Guardian)', extracted_text, re.IGNORECASE)
+    if nominee:
+        data['nominee_name'] = nominee.group(1).strip()
 
-    num = re.search(r'(?:Deposit\s*No\.?|Certificate\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-]+)', extracted_text, re.IGNORECASE)
-    if num: data['account_fd_no'] = num.group(1).strip()
+    # 4. Certificate / Receipt Number
+    num = re.search(r'(?:Deposit\s*No\.?|Certificate\s*No\.?|Receipt\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-]+)', extracted_text, re.IGNORECASE)
+    if num:
+        data['account_fd_no'] = num.group(1).strip()
 
-    principal = re.search(r'(?:Deposit\s*Amount|Initial\s*advance|Principal)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', extracted_text, re.IGNORECASE)
-    if principal: data['principal'] = float(principal.group(1).replace(',', ''))
+    # 5. Principal Amount
+    principal = re.search(r'(?:Total\s*advance|Deposit\s*Amount|Initial\s*advance|Principal)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', extracted_text, re.IGNORECASE)
+    if principal:
+        data['principal'] = float(principal.group(1).replace(',', ''))
 
-    rate = re.search(r'(?:Rate\s*of\s*Interest|ROI)[\:\s]*([\d\.]+)\s*\%', extracted_text, re.IGNORECASE)
-    if rate: data['rate'] = float(rate.group(1))
+    # 6. Interest Rate / ROI
+    rate = re.search(r'(?:Rate\s*of\s*Interest|ROI|Rate)[\:\s]*([\d\.]+)\s*\%', extracted_text, re.IGNORECASE)
+    if rate:
+        data['rate'] = float(rate.group(1))
 
-    mat_date = re.search(r'(?:Date\s*of\s*Maturity|Next\s*Option\s*Date|Maturity\s*Date)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', extracted_text, re.IGNORECASE)
-    if mat_date: data['maturity_date'] = mat_date.group(1)
+    # 7. Maturity / Next Option Date
+    mat_date = re.search(r'(?:Next\s*Option\s*Date|Date\s*of\s*Maturity|Maturity\s*Date)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', extracted_text, re.IGNORECASE)
+    if mat_date:
+        data['maturity_date'] = mat_date.group(1)
 
+    # 8. Maturity Amount
     mat_amt = re.search(r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[\*\₹\s]*([\d,]+(?:\.\d{2})?)', extracted_text, re.IGNORECASE)
-    if mat_amt: data['maturity_amount'] = float(mat_amt.group(1).replace(',', ''))
+    if mat_amt:
+        data['maturity_amount'] = float(mat_amt.group(1).replace(',', ''))
 
     return data
 
@@ -69,18 +88,18 @@ with col_left:
     
     if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Document", use_container_width=True)
+        
+        # Orient image properly
+        image = ImageOps.exif_transpose(image)
+        
+        # Manual rotation control in case image is uploaded sideways
+        rotate_angle = st.radio("Rotate Image if Sideways:", [0, 90, 180, 270], horizontal=True, index=1)
+        if rotate_angle != 0:
+            image = image.rotate(-rotate_angle, expand=True)
+
+        st.image(image, caption="Processed Image for Scanning", use_container_width=True)
         
         with st.spinner("Extracting text details..."):
-            # Auto-rotate sideways images if needed
-            try:
-                osd = pytesseract.image_to_osd(image)
-                angle = int(re.search(r'Rotate:\s*(\d+)', osd).group(1))
-                if angle != 0:
-                    image = image.rotate(360 - angle, expand=True)
-            except Exception:
-                pass
-
             extracted_text = pytesseract.image_to_string(image)
             extracted = parse_fd(extracted_text)
 

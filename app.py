@@ -298,114 +298,101 @@ def process_ocr_cached(image_bytes, rotate_angle):
 
 
 # ---------------------------------------------------------
-# 6. STREAMLIT UI SETUP & AESTHETIC STYLING
+# 6. STREAMLIT UI SETUP & COMPACT AESTHETIC STYLING
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="FD Portfolio Manager",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# Custom CSS for Modern, Professional Aesthetic UI
+# Custom CSS for Single-Page Compact Fit
 st.markdown(
     """
     <style>
-        /* Base Page Background & Font */
+        /* Compact Page Layout & Margins */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+        }
         .stApp {
             background-color: #F8FAFC;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
-        /* Custom Header Hero */
+        /* Compact Header */
         .header-hero {
             background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
             color: #FFFFFF;
-            padding: 2rem 2.5rem;
-            border-radius: 16px;
-            margin-bottom: 2rem;
-            box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15);
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
         }
         .header-hero h1 {
             color: #F8FAFC !important;
             font-weight: 700 !important;
-            font-size: 2.2rem !important;
+            font-size: 1.5rem !important;
             margin: 0 !important;
-            letter-spacing: -0.02em;
         }
         .header-hero p {
             color: #94A3B8;
-            font-size: 1rem;
-            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            margin-top: 0.25rem;
             margin-bottom: 0;
         }
 
-        /* Metric Cards Styling */
+        /* Compact Metric Cards */
         div[data-testid="stMetric"] {
             background-color: #FFFFFF;
-            padding: 1.25rem 1.5rem;
-            border-radius: 12px;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
             border: 1px solid #E2E8F0;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        div[data-testid="stMetric"]:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
         }
         div[data-testid="stMetricLabel"] {
             color: #64748B !important;
-            font-size: 0.875rem !important;
+            font-size: 0.75rem !important;
             font-weight: 600 !important;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
         }
         div[data-testid="stMetricValue"] {
             color: #0F172A !important;
-            font-size: 1.75rem !important;
+            font-size: 1.25rem !important;
             font-weight: 700 !important;
         }
 
-        /* Form & Card Containers */
+        /* Form & Tab Spacing */
         div[data-testid="stForm"] {
             background-color: #FFFFFF;
-            padding: 2rem;
-            border-radius: 14px;
+            padding: 1rem;
+            border-radius: 10px;
             border: 1px solid #E2E8F0;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
         }
-
-        /* Buttons Styling */
-        .stButton>button {
-            border-radius: 8px !important;
-            font-weight: 600 !important;
-            transition: all 0.2s ease !important;
-        }
-        
-        /* Tab Navigation Styling */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 12px;
-            background-color: transparent;
+            gap: 8px;
         }
         .stTabs [data-baseweb="tab"] {
-            height: 48px;
-            border-radius: 8px;
-            padding: 0 20px;
-            background-color: #E2E8F0;
-            color: #475569;
+            height: 38px;
+            border-radius: 6px;
+            padding: 0 16px;
             font-weight: 600;
+            font-size: 0.9rem;
         }
         .stTabs [aria-selected="true"] {
             background-color: #2563EB !important;
             color: #FFFFFF !important;
         }
         
-        /* Expander Styling */
-        .streamlit-expanderHeader {
-            background-color: #FFFFFF;
-            border-radius: 8px;
-            border: 1px solid #E2E8F0;
-            font-weight: 600;
-            color: #1E293B;
+        /* Reduce dividers & headers */
+        hr {
+            margin: 0.75rem 0 !important;
+        }
+        h2, h3 {
+            margin-top: 0.25rem !important;
+            margin-bottom: 0.5rem !important;
         }
     </style>
     """,
@@ -423,113 +410,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab1, tab2 = st.tabs(["📄 Scan & Add Certificate", "📊 View Portfolio"])
+tab1, tab2 = st.tabs(["📊 View Portfolio", "📄 Scan & Add Certificate"])
 
-# --- TAB 1: SCAN & ADD ---
+# --- TAB 1: PORTFOLIO & ANALYTICS ---
 with tab1:
-  col_left, col_right = st.columns([1, 1], gap="large")
-
-  with col_left:
-    st.subheader("1. Scan Certificate Image")
-    uploaded_file = st.file_uploader(
-        "Upload FD / Deposit Receipt (JPG/PNG)", type=["png", "jpg", "jpeg"]
-    )
-
-    if uploaded_file:
-      rotate_angle = st.radio(
-          "Rotate Image if Sideways:",
-          [0, 90, 180, 270],
-          horizontal=True,
-          index=0,
-      )
-
-      file_bytes = uploaded_file.getvalue()
-      img_preview = Image.open(io.BytesIO(file_bytes))
-      img_preview = ImageOps.exif_transpose(img_preview)
-      if rotate_angle != 0:
-        img_preview = img_preview.rotate(-rotate_angle, expand=True)
-      st.image(
-          img_preview,
-          caption="Processed Image for Scanning",
-          use_container_width=True,
-      )
-
-      with st.spinner("Scanning document details..."):
-        extracted = process_ocr_cached(file_bytes, rotate_angle)
-
-  with col_right:
-    st.subheader("2. Review & Save Details")
-    if uploaded_file:
-      with st.form("fd_entry_form"):
-        holder = st.text_input(
-            "Holder / Applicant Name", value=extracted["holder_name"]
-        )
-        nominee = st.text_input("Nominee Name", value=extracted["nominee_name"])
-        inst = st.text_input(
-            "Institution / Company Name", value=extracted["institution_name"]
-        )
-        fd_no = st.text_input(
-            "Deposit / Certificate Number", value=extracted["account_fd_no"]
-        )
-
-        c1, c2 = st.columns(2)
-        principal = c1.number_input(
-            "Principal / Advance Amount (₹)", value=extracted["principal"]
-        )
-        rate = c2.number_input(
-            "Interest Rate / ROI (%)", value=extracted["rate"]
-        )
-
-        est_monthly_interest = (principal * (rate / 100)) / 12
-
-        c3, c4 = st.columns(2)
-        mat_date = c3.text_input(
-            "Maturity / Option Date", value=extracted["maturity_date"]
-        )
-        monthly_interest_input = c4.number_input(
-            "Monthly Interest Amount (₹)",
-            value=round(est_monthly_interest, 2),
-        )
-
-        submit_button = st.form_submit_button(
-            "💾 Save FD Record", use_container_width=True
-        )
-
-        if submit_button:
-          try:
-            c.execute(
-                """
-                            INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                (
-                    holder,
-                    nominee,
-                    inst,
-                    fd_no,
-                    principal,
-                    rate,
-                    mat_date,
-                    principal,
-                ),
-            )
-            conn.commit()
-            st.success("Record successfully saved!")
-            st.rerun()
-          except sqlite3.IntegrityError:
-            st.error(
-                "This Certificate/FD Number already exists in your database."
-            )
-    else:
-      st.info(
-          "Upload a document on the left to extract details automatically."
-      )
-
-
-# --- TAB 2: PORTFOLIO & ANALYTICS ---
-with tab2:
-  st.subheader("📊 Fixed Deposit Portfolio Analytics")
-
   df = pd.read_sql_query(
       "SELECT id, holder_name, nominee_name, institution_name, account_fd_no, "
       "principal_amount, interest_rate, maturity_date, maturity_amount FROM"
@@ -553,12 +437,9 @@ with tab2:
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Deposits", total_deposits)
-    m2.metric("Total Principal Invested", f"₹{total_principal:,.2f}")
-    m3.metric("Total Monthly Interest", f"₹{total_monthly_interest:,.2f}")
-    m4.metric("Weighted Avg ROI", f"{weighted_rate:.2f}%")
-
-    st.markdown("---")
-    st.subheader("📋 All Saved Records")
+    m2.metric("Total Principal", f"₹{total_principal:,.2f}")
+    m3.metric("Monthly Interest", f"₹{total_monthly_interest:,.2f}")
+    m4.metric("Weighted ROI", f"{weighted_rate:.2f}%")
 
     df_display = (
         df.drop(columns=["nominee_name", "maturity_amount"])
@@ -577,10 +458,12 @@ with tab2:
         .round({"Monthly Interest (₹)": 2})
     )
 
+    # Height set to 380px (~10 rows). Adds vertical scrollbar if > 10 rows.
     st.dataframe(
         df_display,
         use_container_width=True,
         hide_index=True,
+        height=380,
         column_config={
             "ID": st.column_config.NumberColumn("ID", width="small"),
             "Holder Name": st.column_config.TextColumn(
@@ -607,14 +490,13 @@ with tab2:
         },
     )
 
-    st.markdown("---")
     col_edit, col_del = st.columns(2, gap="large")
 
-    # --- EDIT & UPDATE RECORD ---
+    # EDIT RECORD
     with col_edit:
       with st.expander("✏️ Update a Record"):
         edit_id = st.number_input(
-            "Select Record ID to Edit",
+            "Record ID to Edit",
             min_value=int(df["id"].min()),
             max_value=int(df["id"].max()),
             step=1,
@@ -685,18 +567,13 @@ with tab2:
                 st.success(f"Record #{edit_id} updated successfully!")
                 st.rerun()
               except sqlite3.IntegrityError:
-                st.error(
-                    "Certificate Number conflict. Another record already has"
-                    " this certificate number."
-                )
-        else:
-          st.warning(f"No record found with ID {edit_id}")
+                st.error("Certificate Number conflict.")
 
-    # --- DELETE RECORD ---
+    # DELETE RECORD
     with col_del:
       with st.expander("🗑️ Delete a Record"):
         del_id = st.number_input(
-            "Enter Record ID to delete", min_value=1, step=1, key="del_id_input"
+            "Record ID to delete", min_value=1, step=1, key="del_id_input"
         )
         if st.button("Delete Record", use_container_width=True):
           c.execute("DELETE FROM fixed_deposits WHERE id = ?", (del_id,))
@@ -704,6 +581,93 @@ with tab2:
           st.success(f"Record #{del_id} deleted successfully.")
           st.rerun()
   else:
-    st.info(
-        "No fixed deposit records saved yet. Use Tab 1 to scan and add records."
+    st.info("No fixed deposit records saved yet.")
+
+
+# --- TAB 2: SCAN & ADD ---
+with tab2:
+  col_left, col_right = st.columns([1, 1], gap="large")
+
+  with col_left:
+    st.subheader("1. Scan Certificate Image")
+    uploaded_file = st.file_uploader(
+        "Upload FD / Deposit Receipt", type=["png", "jpg", "jpeg"]
     )
+
+    if uploaded_file:
+      rotate_angle = st.radio(
+          "Rotate Image:", [0, 90, 180, 270], horizontal=True, index=0
+      )
+      file_bytes = uploaded_file.getvalue()
+      img_preview = Image.open(io.BytesIO(file_bytes))
+      img_preview = ImageOps.exif_transpose(img_preview)
+      if rotate_angle != 0:
+        img_preview = img_preview.rotate(-rotate_angle, expand=True)
+      st.image(
+          img_preview, caption="Processed Image", use_container_width=True
+      )
+
+      with st.spinner("Scanning document..."):
+        extracted = process_ocr_cached(file_bytes, rotate_angle)
+
+  with col_right:
+    st.subheader("2. Review & Save Details")
+    if uploaded_file:
+      with st.form("fd_entry_form"):
+        holder = st.text_input(
+            "Holder / Applicant Name", value=extracted["holder_name"]
+        )
+        nominee = st.text_input("Nominee Name", value=extracted["nominee_name"])
+        inst = st.text_input(
+            "Institution / Company Name", value=extracted["institution_name"]
+        )
+        fd_no = st.text_input(
+            "Deposit / Certificate Number", value=extracted["account_fd_no"]
+        )
+
+        c1, c2 = st.columns(2)
+        principal = c1.number_input(
+            "Principal (₹)", value=extracted["principal"]
+        )
+        rate = c2.number_input("ROI (%)", value=extracted["rate"])
+
+        est_monthly_interest = (principal * (rate / 100)) / 12
+
+        c3, c4 = st.columns(2)
+        mat_date = c3.text_input(
+            "Maturity Date", value=extracted["maturity_date"]
+        )
+        monthly_interest_input = c4.number_input(
+            "Monthly Interest Amount (₹)",
+            value=round(est_monthly_interest, 2),
+        )
+
+        submit_button = st.form_submit_button(
+            "💾 Save FD Record", use_container_width=True
+        )
+
+        if submit_button:
+          try:
+            c.execute(
+                """
+                            INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                (
+                    holder,
+                    nominee,
+                    inst,
+                    fd_no,
+                    principal,
+                    rate,
+                    mat_date,
+                    principal,
+                ),
+            )
+            conn.commit()
+            st.success("Record successfully saved!")
+            st.rerun()
+          except sqlite3.IntegrityError:
+            st.error("This Certificate/FD Number already exists.")
+    else:
+      st.info("Upload a document on the left to extract details.")

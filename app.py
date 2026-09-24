@@ -28,6 +28,49 @@ conn.commit()
 # --------------------------------------------------
 # 2. OCR PARSING FUNCTIONS
 # --------------------------------------------------
+def extract_kapil_monthly_payout(text, principal):
+    """
+    Multi-pass extraction for monthly interest payout from Kapil Certificates.
+    Handles OCR noise, missing punctuation, and stamp overlaps.
+    """
+    # Pass 1: Direct regex match for standard 4-digit monthly payouts (e.g., 3,333 or 4,583)
+    exact_match = re.search(r'\b([34][,.]?\d{3})\b', text)
+    if exact_match:
+        val_str = re.sub(r'[^\d]', '', exact_match.group(1))
+        try:
+            val = float(val_str)
+            if 1000 <= val <= 10000:
+                return val
+        except ValueError:
+            pass
+
+    # Pass 2: Look for numbers following table column header "Interest Amount" or "Interest"
+    header_match = re.search(r'Interest\s*(?:Amount)?\s*[\n\r:]*\s*([0-9,.]{4,6})', text, re.IGNORECASE)
+    if header_match:
+        val_str = re.sub(r'[^\d]', '', header_match.group(1))
+        try:
+            val = float(val_str)
+            if 1000 <= val <= 10000:
+                return val
+        except ValueError:
+            pass
+
+    # Pass 3: Search for any standalone 4-digit number in the range 3000 to 6000
+    all_4digits = re.findall(r'\b([3-6]\d{3})\b', text)
+    if all_4digits:
+        try:
+            val = float(all_4digits[0])
+            return val
+        except ValueError:
+            pass
+
+    # Pass 4: Fallback calculation if OCR completely fails (assumes standard 10% p.a.)
+    if principal > 0:
+        return round((principal * 0.10) / 12, 2)
+
+    return 0.0
+
+
 def parse_kapil_format(text):
     data = {
         'holder_name': '',
@@ -65,34 +108,17 @@ def parse_kapil_format(text):
         except ValueError:
             pass
 
-    # Monthly Payout & ROI Calculation Fix
-    monthly_payout = 0.0
-    
-    # Strictly target standard monthly payout patterns (3,333 or 4,583) or 4-digit numbers in the table
-    payout_match = re.search(r'\b(3[,.]?333|4[,.]?583)\b', text)
-    if payout_match:
-        val_str = payout_match.group(1).replace(',', '').replace('.', '')
-        try:
-            monthly_payout = float(val_str)
-        except ValueError:
-            pass
-    else:
-        # Fallback 4-digit numeric search in table area
-        four_digit_matches = re.findall(r'\b([3-5][,.]?\d{3})\b', text)
-        if four_digit_matches:
-            try:
-                monthly_payout = float(four_digit_matches[0].replace(',', '').replace('.', ''))
-            except ValueError:
-                pass
+    # Extract Monthly Payout using Multi-Pass Function
+    monthly_payout = extract_kapil_monthly_payout(text, data['principal_amount'])
 
-    # Dynamic ROI calculation with ceiling sanity check
+    # Dynamic ROI Calculation & Sanity Check
     if data['principal_amount'] > 0 and monthly_payout > 0:
         calculated_roi = round((monthly_payout * 12 / data['principal_amount']) * 100, 2)
-        # Cap unrealistic OCR misreads (>12%) back to default 10.0%
-        if calculated_roi > 12.0:
-            data['interest_rate'] = 10.0
-        else:
+        # Cap unrealistic rates (>12.0%) resulting from bad OCR reads to default 10.0%
+        if 8.0 <= calculated_roi <= 12.0:
             data['interest_rate'] = calculated_roi
+        else:
+            data['interest_rate'] = 10.0
     else:
         data['interest_rate'] = 10.0
 

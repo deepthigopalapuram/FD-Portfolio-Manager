@@ -69,7 +69,7 @@ with col_left:
     
     if uploaded_file:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Document", use_column_width=True)
+        st.image(image, caption="Uploaded Document", use_container_width=True)
         
         with st.spinner("Extracting text details..."):
             extracted_text = pytesseract.image_to_string(image)

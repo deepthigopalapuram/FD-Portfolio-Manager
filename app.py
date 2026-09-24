@@ -472,6 +472,7 @@ with tab1:
         .round({"Monthly Interest (₹)": 2})
     )
 
+    # Interactive dataframe featuring native sorting, filtering, and search bars
     st.dataframe(
         df_display,
         use_container_width=True,
@@ -611,7 +612,6 @@ with tab2:
       )
       file_bytes = uploaded_file.getvalue()
 
-      # Preview image handling using preprocessor helper
       _, img_preview = preprocess_image_for_ocr(file_bytes, rotate_angle)
       st.image(
           img_preview, caption="Processed Image", use_container_width=True

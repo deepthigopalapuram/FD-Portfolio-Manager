@@ -1,28 +1,3 @@
-import streamlit as st
-import sqlite3
-import pytesseract
-from PIL import Image, ImageOps
-import re
-
-# 1. DATABASE SETUP
-conn = sqlite3.connect('fds.db', check_same_thread=False)
-c = conn.cursor()
-c.execute('''
-    CREATE TABLE IF NOT EXISTS fixed_deposits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        holder_name TEXT,
-        nominee_name TEXT,
-        institution_name TEXT, 
-        account_fd_no TEXT UNIQUE,
-        principal_amount REAL, 
-        interest_rate REAL,
-        maturity_date TEXT,
-        maturity_amount REAL
-    )
-''')
-conn.commit()
-
-# 2. CUSTOM PARSER FOR KAPIL PROPERTY & OTHER FD RECEIPTS
 def parse_fd(extracted_text):
     data = {
         'holder_name': '', 'nominee_name': '', 'institution_name': '',
@@ -30,163 +5,106 @@ def parse_fd(extracted_text):
         'maturity_date': '', 'maturity_amount': 0.0
     }
 
-    # Normalize extracted text line by line
     lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
     full_text = " ".join(lines)
 
-    # 1. Institution Name
-    if re.search(r'KAPIL', full_text, re.IGNORECASE):
-        data['institution_name'] = "KAPIL PROPERTY DEVELOPERS LTD"
+    # 1. INSTITUTION NAME
+    inst_match = re.search(
+        r'([A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|FINANCE|DEVELOPERS|BANK|CORPORATION|SERVICES))', 
+        full_text, re.IGNORECASE
+    )
+    if inst_match:
+        data['institution_name'] = re.sub(r'\s+', ' ', inst_match.group(1)).strip().upper()
     else:
-        inst = re.search(r'(SHRIRAM\s+FINANCE|HDFC|ICICI|SBI|AXIS|CANARA|KOTAK)', full_text, re.IGNORECASE)
-        if inst:
-            data['institution_name'] = inst.group(0).upper().strip()
+        for line in lines[:5]:
+            if len(line) > 5 and line.isupper() and not any(kw in line.lower() for kw in ['certificate', 'advance', 'receipt', 'application']):
+                data['institution_name'] = line.strip()
+                break
 
-    # 2. Holder / Applicant Name
-    holder = re.search(r'(?:Name\s*\(s\)\s*of\s*the\s*applicant|Depositor)\s*[\:\-\s]+([A-Z\s]{4,40})(?=\s+Address|\s+Date|\s+Father|\s+Customer)', full_text, re.IGNORECASE)
-    if holder:
-        data['holder_name'] = holder.group(1).strip()
+    # 2. HOLDER / APPLICANT NAME
+    holder_match = re.search(
+        r'(?:Name\s*\(?s\)?\s*of\s*(?:the)?\s*applicant|Depositor\s*Name|Holder\s*Name)\s*[\:\-\s]+([A-Z\s\.]{3,40})(?=\s+(?:Address|Date|Father|Husband|Customer|S/o|D/o|W/o|\d))', 
+        full_text, re.IGNORECASE
+    )
+    if holder_match:
+        data['holder_name'] = holder_match.group(1).strip()
 
-    # 3. Nominee Name
-    nominee = re.search(r'(?:Nominee\s*Name|Nominee)\s*[\:\-\s]*([A-Z\.\s]{3,35})(?=\s+Nominee|\s+Relation|\s+HUSBAND|\s+WIFE|\s+FATHER|\s+MOTHER|\s+SON)', full_text, re.IGNORECASE)
-    if nominee:
-        clean_nominee = nominee.group(1).strip()
-        if len(clean_nominee) > 2 and not clean_nominee.isupper():
-            clean_nominee = clean_nominee.upper()
-        data['nominee_name'] = clean_nominee
+    # 3. NOMINEE NAME (Excludes table header terms like NOMINEE / RELATION)
+    # Search for text following 'Nominee Name' that isn't just the header word 'NOMINEE'
+    nominee_match = re.search(
+        r'Nominee\s*Name[\:\-\s]*(?:Nominee\s*Relation)?[\:\-\s]*([A-Z\.\s]{3,35})(?=\s+(?:HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER|BROTHER|SISTER|MAJOR|MINOR|GUARDIAN|\d))', 
+        full_text, re.IGNORECASE
+    )
+    if nominee_match and nominee_match.group(1).strip().upper() != "NOMINEE":
+        data['nominee_name'] = nominee_match.group(1).strip()
     else:
-        # Fallback search for G. DURGA PRASAD pattern
-        fallback_nominee = re.search(r'([A-Z]\.?\s*[A-Z\s]{3,30})(?=\s+HUSBAND|\s+WIFE)', full_text)
-        if fallback_nominee:
-            data['nominee_name'] = fallback_nominee.group(1).strip()
+        # Fallback: Find name appearing directly before relation keywords (e.g., HUSBAND/WIFE)
+        relation_match = re.search(
+            r'([A-Z][A-Z\.\s]{2,30})\s+(?:HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER|BROTHER|SISTER)', 
+            full_text
+        )
+        if relation_match:
+            candidate = relation_match.group(1).strip()
+            # Ensure we didn't capture static header words
+            if candidate.upper() not in ["NOMINEE NAME", "NOMINEE", "RELATION"]:
+                data['nominee_name'] = candidate
 
-    # 4. Certificate / Receipt Number
-    num = re.search(r'(?:SAHRB\/KPD[A-Z0-9\/\-]+|[A-Z0-9]{4,}\/[A-Z0-9\/\-]+)', full_text)
-    if num:
-        data['account_fd_no'] = num.group(0).strip()
+    # 4. CERTIFICATE / RECEIPT NUMBER
+    num_match = re.search(
+        r'(?:Certificate\s*No\.?|Receipt\s*No\.?|Deposit\s*No\.?|Ref\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-\_]{5,30})', 
+        full_text, re.IGNORECASE
+    )
+    if num_match:
+        data['account_fd_no'] = num_match.group(1).strip()
     else:
-        num_alt = re.search(r'(?:Deposit\s*No\.?|Certificate\s*No\.?|Receipt\s*No\.?)\s*[\:\-\s]+([A-Z0-9\/\-]+)', full_text, re.IGNORECASE)
-        if num_alt:
-            data['account_fd_no'] = num_alt.group(1).strip()
+        code_match = re.search(r'\b([A-Z]{3,8}\/[A-Z0-9\/\-]{5,25})\b', full_text)
+        if code_match:
+            data['account_fd_no'] = code_match.group(1).strip()
 
-    # 5. Principal Amount
-    principal = re.search(r'(?:Total\s*advance|Deposit\s*Amount|Initial\s*advance|Principal)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
-    if principal:
-        data['principal'] = float(principal.group(1).replace(',', ''))
+    # 5. PRINCIPAL AMOUNT
+    principal_match = re.search(
+        r'(?:Total\s*advance|Deposit\s*Amount|Initial\s*advance|Principal\s*Amount)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+        full_text, re.IGNORECASE
+    )
+    if principal_match:
+        data['principal'] = float(principal_match.group(1).replace(',', ''))
 
-    # 6. Interest Rate Calculation (Monthly Interest -> Annual ROI %)
-    # Look for explicit rate first
-    rate_match = re.search(r'(?:Rate\s*of\s*Interest|ROI|Rate)[\:\s]*([\d\.]+)\s*\%', full_text, re.IGNORECASE)
+    # 6. INTEREST RATE (Calculated dynamically if monthly payout is detected)
+    rate_match = re.search(r'(?:Rate\s*of\s*Interest|ROI|Interest\s*Rate|Rate)[\:\s]*([\d\.]+)\s*\%', full_text, re.IGNORECASE)
     if rate_match:
         data['rate'] = float(rate_match.group(1))
     elif data['principal'] > 0:
-        # Calculate from Monthly Interest Amount
-        monthly_interest = re.search(r'(?:Monthly|Monthly\s*Interest|Interest\s*Amount|Advance\s*Payout)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
-        if monthly_interest:
-            m_amt = float(monthly_interest.group(1).replace(',', ''))
-            calculated_rate = ((m_amt * 12) / data['principal']) * 100
-            data['rate'] = round(calculated_rate, 2)
+        # Look for monthly interest values (e.g., 5500.00 or 5,500)
+        monthly_match = re.search(
+            r'(?:Monthly|Monthly\s*Interest|Interest\s*Amount|Advance\s*Payout)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+            full_text, re.IGNORECASE
+        )
+        if monthly_match:
+            monthly_val = float(monthly_match.group(1).replace(',', ''))
+            # Calculate annual rate: (Monthly Interest * 12 / Principal) * 100
+            data['rate'] = round(((monthly_val * 12) / data['principal']) * 100, 2)
 
-    # 7. Maturity / Next Option Date
-    mat_date = re.search(r'(?:Next\s*Option\s*Date|Date\s*of\s*Maturity|Maturity\s*Date)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', full_text, re.IGNORECASE)
-    if mat_date:
-        data['maturity_date'] = mat_date.group(1)
+    # 7. MATURITY / NEXT OPTION DATE
+    mat_match = re.search(
+        r'(?:Next\s*Option\s*Date|Maturity\s*Date|Date\s*of\s*Maturity|Option\s*Date)[\:\s]*([\d]{2}[\/\-\.][\d]{2}[\/\-\.][\d]{2,4})', 
+        full_text, re.IGNORECASE
+    )
+    if mat_match:
+        data['maturity_date'] = mat_match.group(1)
     else:
-        # Fallback date search
-        dates = re.findall(r'(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})', full_text)
-        if len(dates) >= 2:
-            data['maturity_date'] = dates[-1] # Pick latest date as option/maturity date
+        # Find all dates in the text and select the latest date
+        all_dates = re.findall(r'\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b', full_text)
+        if all_dates:
+            data['maturity_date'] = all_dates[-1]
 
-    # 8. Maturity Amount
-    mat_amt = re.search(r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[\*\₹\s]*([\d,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
-    if mat_amt:
-        data['maturity_amount'] = float(mat_amt.group(1).replace(',', ''))
+    # 8. MATURITY AMOUNT
+    mat_amt_match = re.search(
+        r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+        full_text, re.IGNORECASE
+    )
+    if mat_amt_match:
+        data['maturity_amount'] = float(mat_amt_match.group(1).replace(',', ''))
     elif data['principal'] > 0:
         data['maturity_amount'] = data['principal']
 
     return data
-
-# 3. WEB INTERFACE
-st.set_page_config(page_title="FD Portfolio Manager", layout="wide")
-st.title("💼 Fixed Deposit Portfolio Manager")
-
-st.markdown("---")
-col_left, col_right = st.columns([1, 1], gap="large")
-
-with col_left:
-    st.subheader("1. Scan Certificate Image")
-    uploaded_file = st.file_uploader("Upload FD / Deposit Receipt (JPG/PNG)", type=['png', 'jpg', 'jpeg'])
-    
-    if uploaded_file:
-        image = Image.open(uploaded_file)
-        
-        # Auto-correct orientation metadata
-        image = ImageOps.exif_transpose(image)
-        
-        # Manual rotation control
-        rotate_angle = st.radio("Rotate Image if Sideways:", [0, 90, 180, 270], horizontal=True, index=1)
-        if rotate_angle != 0:
-            image = image.rotate(-rotate_angle, expand=True)
-
-        st.image(image, caption="Processed Image for Scanning", use_container_width=True)
-        
-        with st.spinner("Extracting text details..."):
-            extracted_text = pytesseract.image_to_string(image)
-            extracted = parse_fd(extracted_text)
-
-with col_right:
-    st.subheader("2. Review & Save Details")
-    if uploaded_file:
-        with st.form("fd_entry_form"):
-            holder = st.text_input("Holder / Applicant Name", value=extracted['holder_name'])
-            nominee = st.text_input("Nominee Name", value=extracted['nominee_name'])
-            inst = st.text_input("Institution / Company Name", value=extracted['institution_name'])
-            fd_no = st.text_input("Deposit / Certificate Number", value=extracted['account_fd_no'])
-            
-            c1, c2 = st.columns(2)
-            principal = c1.number_input("Principal / Advance Amount (₹)", value=extracted['principal'])
-            rate = c2.number_input("Interest Rate / ROI (%)", value=extracted['rate'])
-            
-            c3, c4 = st.columns(2)
-            mat_date = c3.text_input("Maturity / Option Date", value=extracted['maturity_date'])
-            mat_amt = c4.number_input("Maturity Amount (₹)", value=extracted['maturity_amount'])
-
-            submit_button = st.form_submit_button("💾 Save FD Record", use_container_width=True)
-
-            if submit_button:
-                try:
-                    c.execute('''
-                        INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (holder, nominee, inst, fd_no, principal, rate, mat_date, mat_amt))
-                    conn.commit()
-                    st.success("Record successfully saved!")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("This Certificate/FD Number already exists in your database.")
-    else:
-        st.info("Upload a document on the left to extract details automatically.")
-
-st.markdown("---")
-st.subheader("📊 Stored Portfolio Holdings")
-rows = c.execute("SELECT * FROM fixed_deposits").fetchall()
-
-if rows:
-    total_principal = sum(row[5] for row in rows)
-    st.metric(label="Total Portfolio Value (Principal)", value=f"₹{total_principal:,.2f}")
-    
-    for row in rows:
-        with st.expander(f"📌 **{row[1]}** | {row[3]} ({row[4]})"):
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-            c1.write(f"**Principal:** ₹{row[5]:,.2f}")
-            c1.write(f"**Rate:** {row[6]}%")
-            c2.write(f"**Nominee:** {row[2] if row[2] else 'N/A'}")
-            c2.write(f"**Maturity Amount:** ₹{row[8]:,.2f}")
-            c3.write(f"**Maturity Date:** {row[7]}")
-            
-            if c4.button("Delete", key=f"del_{row[0]}", type="primary"):
-                c.execute("DELETE FROM fixed_deposits WHERE id=?", (row[0],))
-                conn.commit()
-                st.rerun()
-else:
-    st.write("No records saved yet.")

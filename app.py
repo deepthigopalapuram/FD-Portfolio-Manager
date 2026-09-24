@@ -48,10 +48,7 @@ def preprocess_image(image):
     else:
         gray = img_cv
 
-    # Resize image to improve OCR quality for small text
     gray = cv2.resize(gray, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-
-    # Apply adaptive thresholding to clear background noise
     processed = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
     )
@@ -59,16 +56,13 @@ def preprocess_image(image):
 
 
 def extract_text_from_image(image):
-    """Extracts raw text from receipt using Tesseract OCR."""
     processed_img = preprocess_image(image)
     text = pytesseract.image_to_string(processed_img, config="--psm 6")
     return text
 
 
 def parse_kapil_receipt(text):
-    """Parses extracted text specifically for Kapil receipts."""
     data = {}
-    # Example regex patterns for Kapil receipts
     fd_match = re.search(
         r"(?:F\.?D\.?|Receipt|No\.?)\s*[:\-]?\s*([A-Z0-9\-\/]+)", text, re.I
     )
@@ -96,7 +90,6 @@ def parse_kapil_receipt(text):
 
 
 def parse_shriram_receipt(text):
-    """Parses extracted text specifically for Shriram receipts."""
     data = {}
     fd_match = re.search(
         r"(?:Deposit|FD|Receipt)\s*(?:No\.?|Number)\s*[:\-]?\s*([A-Z0-9\-\/]+)",
@@ -140,7 +133,6 @@ tab1, tab2, tab3 = st.tabs(
 with tab1:
     st.header("Portfolio Overview")
 
-    # Fetch all records from database
     query = "SELECT * FROM fixed_deposits"
     df = pd.read_sql_query(query, conn)
 
@@ -149,18 +141,26 @@ with tab1:
             "No fixed deposits found in the database. Add one using the 'Add / Scan Deposit' tab."
         )
     else:
-        # --- ANALYTICAL DASHBOARD & PIE CHART ---
         st.subheader("📈 Institution Portfolio Breakdown")
 
-        # Group by institution to calculate totals
-        summary_df = (
-            df.groupby("institution_name")
-            .agg(
-                total_principal=("principal_amount", "sum"),
-                total_monthly_interest=("interest_amount", "sum"),
+        # Safely handle column check for interest calculation
+        if "interest_amount" in df.columns:
+            summary_df = (
+                df.groupby("institution_name")
+                .agg(
+                    total_principal=("principal_amount", "sum"),
+                    total_monthly_interest=("interest_amount", "sum"),
+                )
+                .reset_index()
             )
-            .reset_index()
-        )
+        else:
+            # Fallback if the column is missing in an older database instance
+            summary_df = (
+                df.groupby("institution_name")
+                .agg(total_principal=("principal_amount", "sum"))
+                .reset_index()
+            )
+            summary_df["total_monthly_interest"] = 0.0
 
         # Calculate portfolio share percentage
         total_portfolio = summary_df["total_principal"].sum()
@@ -265,7 +265,7 @@ with tab2:
             "Account / FD Number",
             value=extracted_data.get("account_fd_no", ""),
         )
-        principal = st.number_format = st.number_input(
+        principal = st.number_input(
             "Principal Amount (₹)",
             value=float(extracted_data.get("principal_amount", 0.0)),
         )

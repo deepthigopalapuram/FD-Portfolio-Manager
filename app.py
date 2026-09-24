@@ -72,7 +72,16 @@ with col_left:
         st.image(image, caption="Uploaded Document", use_container_width=True)
         
         with st.spinner("Extracting text details..."):
-            extracted_text = pytesseract.image_to_string(image)
+            # Auto-detect orientation and rotate if upside-down/sideways
+        try:
+            osd = pytesseract.image_to_osd(image)
+            angle = int(re.search(r'Rotate:\s*(\d+)', osd).group(1))
+            if angle != 0:
+                image = image.rotate(360 - angle, expand=True)
+        except Exception:
+            pass # If orientation detection fails, proceed with original image
+
+        extracted_text = pytesseract.image_to_string(image)
             extracted = parse_fd(extracted_text)
 
 with col_right:

@@ -111,8 +111,9 @@ def parse_kapil_format(full_text):
   if principal_match:
     data["principal"] = safe_float(principal_match.group(1))
 
+  # Updated row match to capture the Next Option Date (Group 3)
   row_match = re.search(
-      r"(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})",
+      r"(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+([\d,]+(?:\.\d{2})?)",
       full_text,
       re.IGNORECASE,
   )
@@ -120,11 +121,13 @@ def parse_kapil_format(full_text):
     data["maturity_date"] = row_match.group(3).strip()
   else:
     dates = re.findall(r"\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b", full_text)
-    if dates:
+    if len(dates) >= 2:
+      data["maturity_date"] = dates[1]
+    elif dates:
       data["maturity_date"] = dates[-1]
 
   monthly_payout = 0.0
-  payout_table_match = re.search(r"\b(3[,.]?333|4[,.]?583)\b", full_text)
+  payout_table_match = re.search(r"\b(3[,.]?333|4[,.]?583|3[,.]?750)\b", full_text)
   if payout_table_match:
     monthly_payout = safe_float(payout_table_match.group(1))
   else:
@@ -306,11 +309,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Custom CSS for Single-Page Ultra-Compact Fit
 st.markdown(
     """
     <style>
-        /* Compact Page Layout & Margins */
         .block-container {
             padding-top: 0.8rem !important;
             padding-bottom: 0.5rem !important;
@@ -321,8 +322,6 @@ st.markdown(
             background-color: #F8FAFC;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-
-        /* Compact Header */
         .header-hero {
             background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
             color: #FFFFFF;
@@ -343,8 +342,6 @@ st.markdown(
             margin-top: 0.15rem;
             margin-bottom: 0;
         }
-
-        /* Compact Metric Cards */
         div[data-testid="stMetric"] {
             background-color: #FFFFFF;
             padding: 0.4rem 0.8rem;
@@ -363,8 +360,6 @@ st.markdown(
             font-size: 1.15rem !important;
             font-weight: 700 !important;
         }
-
-        /* Form & Tab Spacing */
         div[data-testid="stForm"] {
             background-color: #FFFFFF;
             padding: 0.8rem;
@@ -385,8 +380,6 @@ st.markdown(
             background-color: #2563EB !important;
             color: #FFFFFF !important;
         }
-       
-        /* Reduce dividers & headers */
         hr {
             margin: 0.5rem 0 !important;
         }
@@ -400,7 +393,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Header Display
 st.markdown(
     """
     <div class="header-hero">
@@ -459,7 +451,6 @@ with tab1:
         .round({"Monthly Interest (₹)": 2})
     )
 
-    # Height set to 210px (~5 rows + header). Adds vertical scrollbar if > 5 rows.
     st.dataframe(
         df_display,
         use_container_width=True,
@@ -493,7 +484,6 @@ with tab1:
 
     col_edit, col_del = st.columns(2, gap="large")
 
-    # EDIT RECORD
     with col_edit:
       with st.expander("✏️ Update a Record"):
         edit_id = st.number_input(
@@ -570,7 +560,6 @@ with tab1:
               except sqlite3.IntegrityError:
                 st.error("Certificate Number conflict.")
 
-    # DELETE RECORD
     with col_del:
       with st.expander("🗑️ Delete a Record"):
         del_id = st.number_input(

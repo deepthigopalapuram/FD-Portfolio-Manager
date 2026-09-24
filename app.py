@@ -433,11 +433,11 @@ with tab2:
     st.markdown("---")
     st.subheader("📋 All Saved Records")
 
-    df_display = df.rename(
+    # Drop 'nominee_name' column prior to rendering table view
+    df_display = df.drop(columns=["nominee_name"]).rename(
         columns={
             "id": "ID",
             "holder_name": "Holder Name",
-            "nominee_name": "Nominee Name",
             "institution_name": "Institution",
             "account_fd_no": "FD / Cert No.",
             "principal_amount": "Principal (₹)",

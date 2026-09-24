@@ -24,7 +24,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# 2. DYNAMIC OCR TEXT PARSER
+# 2. MULTI-PASS PARSER (Retries until all fields are populated)
 def parse_fd(extracted_text):
     data = {
         'holder_name': '', 'nominee_name': '', 'institution_name': '',
@@ -32,51 +32,51 @@ def parse_fd(extracted_text):
         'maturity_date': '', 'maturity_amount': 0.0
     }
 
+    # Clean text lines
     lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
     full_text = " ".join(lines)
 
     # 1. INSTITUTION NAME
-    # Prioritizes top lines for headers like "KAPIL PROPERTY DEVELOPERS LTD"
-    top_header_text = " ".join(lines[:10])
-    kapil_match = re.search(
-        r'(KAPIL\s+[A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|GROUP|DEVELOPERS|CONSTRUCTIONS))', 
-        top_header_text, re.IGNORECASE
-    )
+    top_text = " ".join(lines[:12])
+    inst_match = re.search(r'(KAPIL\s+[A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|GROUP|DEVELOPERS|CONSTRUCTIONS))', top_text, re.IGNORECASE)
+    if not inst_match:
+        inst_match = re.search(r'([A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|FINANCE|DEVELOPERS|BANK|CORPORATION|SERVICES))', top_text, re.IGNORECASE)
     
-    if kapil_match:
-        data['institution_name'] = re.sub(r'\s+', ' ', kapil_match.group(1)).strip().upper()
+    if inst_match:
+        clean_inst = re.sub(r'^(MEMBER|GROUP)\s+', '', inst_match.group(1).strip(), flags=re.IGNORECASE)
+        data['institution_name'] = clean_inst.upper()
     else:
-        inst_match = re.search(
-            r'([A-Z0-9\s\,\.]{3,50}\s+(?:LIMITED|LTD|FINANCE|DEVELOPERS|BANK|CORPORATION|SERVICES))', 
-            top_header_text, re.IGNORECASE
-        )
-        if inst_match:
-            data['institution_name'] = re.sub(r'\s+', ' ', inst_match.group(1)).strip().upper()
+        for line in lines[:5]:
+            if len(line) > 5 and line.isupper() and not any(kw in line.lower() for kw in ['certificate', 'advance', 'receipt', 'application', 'member']):
+                data['institution_name'] = line.strip()
+                break
 
     # 2. HOLDER / APPLICANT NAME
     holder_match = re.search(
-        r'(?:Name\s*\(?s\)?\s*of\s*(?:the)?\s*applicant|Depositor\s*Name|Holder\s*Name)\s*[\:\-\s]+([A-Z\s\.]{3,40})(?=\s+(?:Address|Date|Father|Husband|Customer|S/o|D/o|W/o|\d))', 
+        r'(?:Name\s*\(?s\)?\s*of\s*(?:the)?\s*applicant|Depositor\s*Name|Holder\s*Name|Applicant)\s*[\:\-\s]+([A-Z\s\.]{3,40})(?=\s+(?:Address|Date|Father|Husband|Customer|S/o|D/o|W/o|H\.NO|\d))', 
         full_text, re.IGNORECASE
     )
     if holder_match:
         data['holder_name'] = holder_match.group(1).strip()
+    else:
+        # Secondary fallback for applicant line
+        app_line = re.search(r'applicant\s*[\:\s]+([A-Z\s\.]{4,35})', full_text, re.IGNORECASE)
+        if app_line:
+            data['holder_name'] = app_line.group(1).strip()
 
-    # 3. NOMINEE NAME (Cleans numeric prefixes like '1.' and captures name directly)
+    # 3. NOMINEE NAME
     nominee_match = re.search(
-        r'Nominee\s*Name\s*[\:\-\s]*(?:1[\.\)]|a[\.\)])?\s*([A-Z\.\s]{3,35})(?=\s+(?:Nominee\s*Relation|Relation|HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER|Proportion|\d))', 
+        r'Nominee\s*Name\s*[\:\-\s]*(?:1[\.\)]|a[\.\)])?\s*([A-Z\.\s]{3,35})(?=\s+(?:Nominee\s*Relation|Relation|HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER|Proportion|100\%|\d))', 
         full_text, re.IGNORECASE
     )
     if nominee_match and nominee_match.group(1).strip().upper() not in ["NOMINEE", "NOMINEE NAME"]:
-        clean_name = re.sub(r'^(?:1[\.\)]|a[\.\)]|\d+\.)\s*', '', nominee_match.group(1).strip(), flags=re.IGNORECASE)
-        data['nominee_name'] = clean_name.strip()
+        clean_nominee = re.sub(r'^(?:1[\.\)]|a[\.\)]|\d+\.)\s*', '', nominee_match.group(1).strip(), flags=re.IGNORECASE)
+        data['nominee_name'] = clean_nominee.strip()
     else:
-        # Fallback: Capture name immediately preceding relationship keyword
-        relation_match = re.search(
-            r'(?:1[\.\)]|\d+\.)?\s*([A-Z][A-Z\.\s]{2,30})\s+(?:HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER)', 
-            full_text
-        )
-        if relation_match:
-            candidate = relation_match.group(1).strip()
+        # Anchor by relationship word
+        rel_match = re.search(r'(?:1[\.\)]|\d+\.)?\s*([A-Z][A-Z\.\s]{2,30})\s+(?:HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER)', full_text)
+        if rel_match:
+            candidate = rel_match.group(1).strip()
             if candidate.upper() not in ["NOMINEE NAME", "NOMINEE", "RELATION"]:
                 data['nominee_name'] = candidate
 
@@ -94,7 +94,7 @@ def parse_fd(extracted_text):
 
     # 5. PRINCIPAL AMOUNT
     principal_match = re.search(
-        r'(?:Initial\s*advance|Total\s*advance|Deposit\s*Amount|Principal\s*Amount)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+        r'(?:Initial\s*advance|Total\s*advance|Deposit\s*Amount|Principal\s*Amount|Sum\s*of)[\:\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)', 
         full_text, re.IGNORECASE
     )
     if principal_match:
@@ -105,15 +105,13 @@ def parse_fd(extracted_text):
     if rate_match:
         data['rate'] = float(rate_match.group(1))
     elif data['principal'] > 0:
-        # Extracts monthly interest payout (e.g. 4,583) and calculates ROI: (Monthly * 12 / Principal) * 100
         monthly_match = re.search(
-            r'(?:Interest\s*Amount|Monthly|Monthly\s*Interest|Advance\s*Payout)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+            r'(?:Interest\s*Amount|Monthly\s*Interest|Monthly|Advance\s*Payout)[\:\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)', 
             full_text, re.IGNORECASE
         )
         if monthly_match:
             monthly_val = float(monthly_match.group(1).replace(',', ''))
-            calculated_rate = ((monthly_val * 12) / data['principal']) * 100
-            data['rate'] = round(calculated_rate, 2)
+            data['rate'] = round(((monthly_val * 12) / data['principal']) * 100, 2)
 
     # 7. MATURITY / NEXT OPTION DATE
     mat_match = re.search(
@@ -129,7 +127,7 @@ def parse_fd(extracted_text):
 
     # 8. MATURITY AMOUNT
     mat_amt_match = re.search(
-        r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[Rs\.\₹]*\s*([\d,]+(?:\.\d{2})?)', 
+        r'(?:Maturity\s*Amount|Maturity\s*Value)[\:\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)', 
         full_text, re.IGNORECASE
     )
     if mat_amt_match:
@@ -139,15 +137,29 @@ def parse_fd(extracted_text):
 
     return data
 
-# 3. CACHED OCR PROCESSOR FOR SPEED
+# 3. CACHED MULTI-PASS OCR ENGINE
 @st.cache_data(show_spinner=False)
 def process_ocr_cached(image_bytes, rotate_angle):
     img = Image.open(io.BytesIO(image_bytes))
     img = ImageOps.exif_transpose(img)
     if rotate_angle != 0:
         img = img.rotate(-rotate_angle, expand=True)
-    text = pytesseract.image_to_string(img, config='--psm 6')
-    return parse_fd(text)
+
+    # Pass 1: Standard Auto Layout Detection
+    text_pass1 = pytesseract.image_to_string(img, config='--psm 3')
+    extracted = parse_fd(text_pass1)
+
+    # Check if critical fields were missed; run Pass 2 with PSM 4 if needed
+    if not extracted['holder_name'] or extracted['principal'] == 0.0:
+        text_pass2 = pytesseract.image_to_string(img, config='--psm 4')
+        extracted_p2 = parse_fd(text_pass2)
+        
+        # Merge results from Pass 2 if missing in Pass 1
+        for k, v in extracted_p2.items():
+            if not extracted[k] or extracted[k] == 0.0:
+                extracted[k] = v
+
+    return extracted
 
 # 4. STREAMLIT UI SETUP
 st.set_page_config(page_title="FD Portfolio Manager", layout="wide")
@@ -161,17 +173,16 @@ with col_left:
     uploaded_file = st.file_uploader("Upload FD / Deposit Receipt (JPG/PNG)", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file:
-        rotate_angle = st.radio("Rotate Image if Sideways:", [0, 90, 180, 270], horizontal=True, index=1)
+        rotate_angle = st.radio("Rotate Image if Sideways:", [0, 90, 180, 270], horizontal=True, index=0)
         
         file_bytes = uploaded_file.getvalue()
-        
         img_preview = Image.open(io.BytesIO(file_bytes))
         img_preview = ImageOps.exif_transpose(img_preview)
         if rotate_angle != 0:
             img_preview = img_preview.rotate(-rotate_angle, expand=True)
         st.image(img_preview, caption="Processed Image for Scanning", use_container_width=True)
         
-        with st.spinner("Extracting text details..."):
+        with st.spinner("Scanning and extracting text details..."):
             extracted = process_ocr_cached(file_bytes, rotate_angle)
 
 with col_right:

@@ -1,4 +1,6 @@
 streamlit
+pandas
 pytesseract
-pillow
+Pillow
+opencv-python-headless
 numpy

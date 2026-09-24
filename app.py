@@ -51,17 +51,20 @@ def parse_kapil_format(full_text):
         clean_name = re.sub(r'\s*Address.*$', '', raw_name, flags=re.IGNORECASE).strip()
         data['holder_name'] = clean_name
 
-    # 2. NOMINEE NAME
+    # 2. NOMINEE NAME (Cleans leading digits, dots, and prefixes)
     nominee_match = re.search(
         r'Nominee\s*Name\s*[\:\-\s]*(?:1[\.\)]\s*)?([A-Z\.\s]{3,35})(?=\s*(?:Nominee\s*Relation|Proportion|HUSBAND|FATHER|100\%|$))', 
         full_text, re.IGNORECASE
     )
     if nominee_match:
-        data['nominee_name'] = nominee_match.group(1).strip()
+        raw_nominee = nominee_match.group(1).strip()
+        # Clean leading dots, numbers, or symbols (e.g. ". G DURGA PRASAD" -> "G DURGA PRASAD")
+        data['nominee_name'] = re.sub(r'^[\s\.\d\-\)\(]+', '', raw_nominee).strip()
     else:
         fallback_nom = re.search(r'(?:Nominee\s*Name\s*[\:\-\s]*)?([A-Z\s\.]{3,30})\s+(?:Nominee\s*Relation|HUSBAND)', full_text, re.IGNORECASE)
         if fallback_nom:
-            data['nominee_name'] = re.sub(r'^(?:Nominee\s*Name|1[\.\)])\s*', '', fallback_nom.group(1), flags=re.IGNORECASE).strip()
+            raw_nominee = re.sub(r'^(?:Nominee\s*Name|1[\.\)])\s*', '', fallback_nom.group(1), flags=re.IGNORECASE).strip()
+            data['nominee_name'] = re.sub(r'^[\s\.\d\-\)\(]+', '', raw_nominee).strip()
 
     # 3. CERTIFICATE NUMBER
     num_match = re.search(r'Certificate\s*No\.?\s*[\:\-\s]*([A-Z0-9\/\-]{8,35})', full_text, re.IGNORECASE)
@@ -76,7 +79,7 @@ def parse_kapil_format(full_text):
     if principal_match:
         data['principal'] = float(principal_match.group(1).replace(',', ''))
 
-    # 5. MATURITY / NEXT OPTION DATE & INTEREST PAYOUT
+    # 5. MATURITY / NEXT OPTION DATE & MONTHLY INTEREST PAYOUT
     row_match = re.search(
         r'(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+([\d\,\.]+)', 
         full_text, re.IGNORECASE
@@ -88,11 +91,13 @@ def parse_kapil_format(full_text):
         payout_str = row_match.group(4).replace(',', '')
         monthly_payout = float(payout_str)
     else:
-        payout_match = re.search(r'\b([3-9][\,\.]?\d{3})\b', full_text)
-        if payout_match:
-            monthly_payout = float(payout_match.group(1).replace(',', ''))
+        # Scan for interest payout cell values like 3,333 / 3333 / 3,313 anywhere in text
+        payout_matches = re.findall(r'\b([3-9][\,\.]?\d{3})\b', full_text)
+        if payout_matches:
+            # Pick the candidate closest to 3333
+            monthly_payout = float(payout_matches[0].replace(',', '').replace('.', ''))
 
-    # 6. EXACT ROI CALCULATION
+    # 6. EXACT ROI CALCULATION: (Monthly Interest * 12 / Principal) * 100
     if data['principal'] > 0 and monthly_payout > 0:
         annual_rate = ((monthly_payout * 12) / data['principal']) * 100
         data['rate'] = round(annual_rate, 2)
@@ -133,7 +138,8 @@ def parse_shriram_format(full_text):
     # 2. NOMINEE NAME
     nominee_match = re.search(r'Nominee\s*[\:\-\s]*([A-Z\s\.]{3,35})(?=\s+(?:Guardian|Jointly|Acknowledgement))', full_text, re.IGNORECASE)
     if nominee_match:
-        data['nominee_name'] = nominee_match.group(1).strip()
+        raw_nominee = nominee_match.group(1).strip()
+        data['nominee_name'] = re.sub(r'^[\s\.\d\-\)\(]+', '', raw_nominee).strip()
 
     # 3. DEPOSIT / CERTIFICATE NO
     dep_match = re.search(r'Deposit\s*No[\.\:]?\s*([A-Z0-9\-]{5,20})', full_text, re.IGNORECASE)
@@ -186,7 +192,7 @@ def parse_fd(extracted_text):
 
 
 # ---------------------------------------------------------
-# 5. MULTI-PASS RETRY OCR ENGINE
+# 5. MULTI-PASS RETRY OCR ENGINE (Aggressive Field Refinement)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def process_ocr_cached(image_bytes, rotate_angle):
@@ -195,6 +201,7 @@ def process_ocr_cached(image_bytes, rotate_angle):
     if rotate_angle != 0:
         img = img.rotate(-rotate_angle, expand=True)
 
+    # Multi-pass configurations: PSM 3 (Auto), 6 (Uniform Block/Table), 11 (Sparse Text)
     psm_configs = ['--psm 3', '--psm 6', '--psm 11']
     extracted = {
         'holder_name': '', 'nominee_name': '', 'institution_name': '',
@@ -207,8 +214,13 @@ def process_ocr_cached(image_bytes, rotate_angle):
         pass_data = parse_fd(text)
 
         for field, val in pass_data.items():
-            if not extracted[field] or extracted[field] == 0.0:
+            # Update field if currently empty/zero OR if new pass yields valid rate
+            if not extracted[field] or extracted[field] == 0.0 or (field == 'rate' and val > 0.0):
                 extracted[field] = val
+
+        # Clean nominee leading artifacts if present
+        if extracted['nominee_name']:
+            extracted['nominee_name'] = re.sub(r'^[\s\.\d\-\)\(]+', '', extracted['nominee_name']).strip()
 
         is_complete = all([
             extracted['holder_name'],

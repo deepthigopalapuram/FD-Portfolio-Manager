@@ -602,7 +602,7 @@ with tab2:
                 "Maturity Date", width="small"
             ),
             "Monthly Interest (₹)": st.column_config.NumberColumn(
-                "Monthly Interest (₹)", format="₹%,.2f", width="large"
+                "Monthly Interest (₹)", format="₹%,.2f", width="medium"
             ),
         },
     )

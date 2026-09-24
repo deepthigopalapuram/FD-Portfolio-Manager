@@ -360,12 +360,16 @@ with tab1:
             "Interest Rate / ROI (%)", value=extracted["rate"]
         )
 
+        # Calculate estimated monthly interest for preview
+        est_monthly_interest = (principal * (rate / 100)) / 12
+
         c3, c4 = st.columns(2)
         mat_date = c3.text_input(
             "Maturity / Option Date", value=extracted["maturity_date"]
         )
-        mat_amt = c4.number_input(
-            "Maturity Amount (₹)", value=extracted["maturity_amount"]
+        monthly_interest_input = c4.number_input(
+            "Monthly Interest Amount (₹)",
+            value=round(est_monthly_interest, 2),
         )
 
         submit_button = st.form_submit_button(
@@ -374,6 +378,7 @@ with tab1:
 
         if submit_button:
           try:
+            # Note: Storing standard principal in maturity_amount slot for schema consistency
             c.execute(
                 """
                             INSERT INTO fixed_deposits (holder_name, nominee_name, institution_name, account_fd_no, principal_amount, interest_rate, maturity_date, maturity_amount)
@@ -387,7 +392,7 @@ with tab1:
                     principal,
                     rate,
                     mat_date,
-                    mat_amt,
+                    principal,
                 ),
             )
             conn.commit()
@@ -415,9 +420,14 @@ with tab2:
   )
 
   if not df.empty:
+    # Compute monthly interest per row: (Principal * (Rate / 100)) / 12
+    df["monthly_interest"] = (
+        df["principal_amount"] * (df["interest_rate"] / 100)
+    ) / 12
+
     total_deposits = len(df)
     total_principal = df["principal_amount"].sum()
-    total_maturity = df["maturity_amount"].sum()
+    total_monthly_interest = df["monthly_interest"].sum()
     weighted_rate = (
         (df["principal_amount"] * df["interest_rate"]).sum() / total_principal
         if total_principal > 0
@@ -427,24 +437,28 @@ with tab2:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Deposits", total_deposits)
     m2.metric("Total Principal Invested", f"₹{total_principal:,.2f}")
-    m3.metric("Total Maturity Value", f"₹{total_maturity:,.2f}")
+    m3.metric("Total Monthly Interest", f"₹{total_monthly_interest:,.2f}")
     m4.metric("Weighted Avg ROI", f"{weighted_rate:.2f}%")
 
     st.markdown("---")
     st.subheader("📋 All Saved Records")
 
-    # Drop 'nominee_name' column prior to rendering table view
-    df_display = df.drop(columns=["nominee_name"]).rename(
-        columns={
-            "id": "ID",
-            "holder_name": "Holder Name",
-            "institution_name": "Institution",
-            "account_fd_no": "FD / Cert No.",
-            "principal_amount": "Principal (₹)",
-            "interest_rate": "ROI (%)",
-            "maturity_date": "Maturity Date",
-            "maturity_amount": "Maturity Amount (₹)",
-        }
+    # Format table to display Monthly Interest instead of Maturity Amount
+    df_display = (
+        df.drop(columns=["nominee_name", "maturity_amount"])
+        .rename(
+            columns={
+                "id": "ID",
+                "holder_name": "Holder Name",
+                "institution_name": "Institution",
+                "account_fd_no": "FD / Cert No.",
+                "principal_amount": "Principal (₹)",
+                "interest_rate": "ROI (%)",
+                "maturity_date": "Maturity Date",
+                "monthly_interest": "Monthly Interest (₹)",
+            }
+        )
+        .round({"Monthly Interest (₹)": 2})
     )
 
     st.dataframe(df_display, use_container_width=True, hide_index=True)
@@ -493,8 +507,9 @@ with tab2:
             e_mat_date = e_c3.text_input(
                 "Maturity Date", value=str(rec["maturity_date"])
             )
-            e_mat_amt = e_c4.number_input(
-                "Maturity Amount (₹)", value=float(rec["maturity_amount"])
+            e_monthly_int = e_c4.number_input(
+                "Monthly Interest Amount (₹)",
+                value=round(float(rec["monthly_interest"]), 2),
             )
 
             update_button = st.form_submit_button(
@@ -508,7 +523,7 @@ with tab2:
                                 UPDATE fixed_deposits
                                 SET holder_name = ?, nominee_name = ?, institution_name = ?,
                                     account_fd_no = ?, principal_amount = ?, interest_rate = ?,
-                                    maturity_date = ?, maturity_amount = ?
+                                    maturity_date = ?
                                 WHERE id = ?
                             """,
                     (
@@ -519,7 +534,6 @@ with tab2:
                         e_principal,
                         e_rate,
                         e_mat_date,
-                        e_mat_amt,
                         int(edit_id),
                     ),
                 )

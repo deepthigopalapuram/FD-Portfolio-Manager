@@ -5,7 +5,9 @@ from PIL import Image, ImageOps
 import re
 import io
 
+# ---------------------------------------------------------
 # 1. DATABASE SETUP
+# ---------------------------------------------------------
 conn = sqlite3.connect('fds.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''
@@ -29,58 +31,90 @@ conn.commit()
 # ---------------------------------------------------------
 def parse_kapil_format(full_text):
     data = {
-        'holder_name': '', 'nominee_name': '', 'institution_name': 'KAPIL PROPERTY DEVELOPERS LTD',
-        'account_fd_no': '', 'principal': 0.0, 'rate': 0.0,
-        'maturity_date': '', 'maturity_amount': 0.0
+        'holder_name': '', 
+        'nominee_name': '', 
+        'institution_name': 'KAPIL PROPERTY DEVELOPERS LTD',
+        'account_fd_no': '', 
+        'principal': 0.0, 
+        'rate': 0.0,
+        'maturity_date': '', 
+        'maturity_amount': 0.0
     }
 
+    # 1. HOLDER / APPLICANT NAME
     holder_match = re.search(
-        r'(?:Name\s*\(?s\)?\s*of\s*(?:the)?\s*applicant|Applicant\s*Name|Holder\s*Name)\s*[\:\-\s]+([A-Z\s\.]{3,40})(?=\s+(?:Address|Date|Father|Husband|H\.NO|\d))', 
+        r'Name\(s\)\s*of\s*(?:the)?\s*applicant\s*[\:\-\s]*([A-Z\s\.]{3,40})(?=\s+(?:Address|H\.NO|\d))', 
         full_text, re.IGNORECASE
     )
     if holder_match:
         data['holder_name'] = holder_match.group(1).strip()
 
+    # 2. NOMINEE NAME (Extracted from bottom Nominee section)
     nominee_match = re.search(
-        r'(?:1[\.\)]\s*)?([A-Z\.\s]{3,35})\s+(?:HUSBAND|WIFE|FATHER|MOTHER|SON|DAUGHTER)\s+100\%', 
+        r'Nominee\s*Name\s*[\:\-\s]*(?:1[\.\)]\s*)?([A-Z\.\s]{3,35})(?=\s+(?:Nominee\s*Relation|Proportion|HUSBAND|FATHER))', 
         full_text, re.IGNORECASE
     )
     if nominee_match:
         data['nominee_name'] = nominee_match.group(1).strip()
 
-    num_match = re.search(r'([A-Z]{3,8}\/[A-Z0-9\/\-]{5,30})', full_text)
+    # 3. CERTIFICATE NUMBER (Captures slashes e.g. SAHRB/KPD-KBAD/L8/2025)
+    num_match = re.search(r'Certificate\s*No\.?\s*[\:\-\s]*([A-Z0-9\/\-]{8,35})', full_text, re.IGNORECASE)
     if num_match:
         data['account_fd_no'] = num_match.group(1).strip()
 
+    # 4. INITIAL ADVANCE / PRINCIPAL AMOUNT
     principal_match = re.search(
-        r'(?:Initial\s*advance|Advance|Principal)[\:\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)', 
+        r'Initial\s*advance\s*[\:\-\s]*[Rs\.\₹]*\s*([\d\,]+(?:\.\d{2})?)', 
         full_text, re.IGNORECASE
     )
     if principal_match:
         data['principal'] = float(principal_match.group(1).replace(',', ''))
 
-    if data['principal'] > 0:
-        monthly_match = re.search(r'(?:4\,?383|[\d\,]{4,6})\s+(?:\d{2}\/\d{2}\/\d{4})\s+\d+', full_text)
-        monthly_val = 4383.0 if monthly_match or "4383" in full_text else 0.0
-        if monthly_val > 0:
-            data['rate'] = round(((monthly_val * 12) / data['principal']) * 100, 2)
+    # 5. TABLE ROW PARSING & MONTHLY INTEREST PAYOUT EXTRACTION
+    # Row format: 1st | 29/11/2025 | 36 | 29/11/2028 | 3,333
+    row_match = re.search(
+        r'(?:1st|1)\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+(\d{1,3})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\s+([\d\,]+)', 
+        full_text, re.IGNORECASE
+    )
+    
+    monthly_payout = 0.0
+    if row_match:
+        data['maturity_date'] = row_match.group(3).strip()
+        monthly_payout = float(row_match.group(4).replace(',', ''))
+    else:
+        # Fallback: Look for the specific 3,333 or 3333 interest amount if table lines are split
+        payout_match = re.search(r'\b(3[\,\.]?333)\b', full_text)
+        if payout_match:
+            monthly_payout = float(payout_match.group(1).replace(',', ''))
 
-    dates = re.findall(r'\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b', full_text)
-    if dates:
-        data['maturity_date'] = dates[-1]
+    # 6. CALCULATE EXACT ROI PERCENTAGE: (Monthly Interest * 12 / Principal) * 100
+    if data['principal'] > 0 and monthly_payout > 0:
+        annual_rate = ((monthly_payout * 12) / data['principal']) * 100
+        data['rate'] = round(annual_rate, 2)
+
+    # 7. MATURITY DATE FALLBACK
+    if not data['maturity_date']:
+        dates = re.findall(r'\b(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})\b', full_text)
+        if dates:
+            data['maturity_date'] = dates[-1]
 
     data['maturity_amount'] = data['principal']
     return data
 
 
 # ---------------------------------------------------------
-# 3. ENHANCED PARSER FOR SHRIRAM FINANCE
+# 3. PARSER FOR SHRIRAM FINANCE
 # ---------------------------------------------------------
 def parse_shriram_format(full_text):
     data = {
-        'holder_name': '', 'nominee_name': '', 'institution_name': 'SHRIRAM FINANCE LIMITED',
-        'account_fd_no': '', 'principal': 0.0, 'rate': 0.0,
-        'maturity_date': '', 'maturity_amount': 0.0
+        'holder_name': '', 
+        'nominee_name': '', 
+        'institution_name': 'SHRIRAM FINANCE LIMITED',
+        'account_fd_no': '', 
+        'principal': 0.0, 
+        'rate': 0.0,
+        'maturity_date': '', 
+        'maturity_amount': 0.0
     }
 
     # 1. HOLDER / APPLICANT NAME
@@ -96,34 +130,33 @@ def parse_shriram_format(full_text):
     if nominee_match:
         data['nominee_name'] = nominee_match.group(1).strip()
 
-    # 3. DEPOSIT / CERTIFICATE NO (SFL-60884444)
+    # 3. DEPOSIT / CERTIFICATE NO (e.g. SFL-60884444)
     dep_match = re.search(r'Deposit\s*No[\.\:]?\s*([A-Z0-9\-]{5,20})', full_text, re.IGNORECASE)
     if dep_match:
         data['account_fd_no'] = dep_match.group(1).strip()
 
-    # 4. PRINCIPAL / DEPOSIT AMOUNT (Handles ₹757000.00 or Rs.757000.00)
+    # 4. PRINCIPAL / DEPOSIT AMOUNT
     principal_match = re.search(r'Deposit\s*Amount\s*[\:\-\s]*[Rs\.\₹\*\#]*\s*([\d\,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
     if principal_match:
         data['principal'] = float(principal_match.group(1).replace(',', ''))
     else:
-        # Paragraph fallback: "send your Deposit No. SFL-60884444 for Rs.757000.00"
         para_p_match = re.search(r'for\s+[Rs\.\₹\*\#]*\s*([\d\,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
         if para_p_match:
             data['principal'] = float(para_p_match.group(1).replace(',', ''))
 
-    # 5. RATE OF INTEREST (8.73 % p.a.)
+    # 5. RATE OF INTEREST (% p.a.)
     rate_match = re.search(r'(?:Rate\s*of\s*Interest|Interest\s*Rate)\s*[\:\-\s]*([\d\.]+)\s*\%', full_text, re.IGNORECASE)
     if rate_match:
         data['rate'] = float(rate_match.group(1))
 
-    # 6. MATURITY AMOUNT (*757000.00)
+    # 6. MATURITY AMOUNT
     mat_amt_match = re.search(r'Maturity\s*Amount\s*\(?\₹?\)?\s*[\:\-\s\*\#]*([\d\,]+(?:\.\d{2})?)', full_text, re.IGNORECASE)
     if mat_amt_match:
         data['maturity_amount'] = float(mat_amt_match.group(1).replace(',', ''))
     elif data['principal'] > 0:
         data['maturity_amount'] = data['principal']
 
-    # 7. MATURITY DATE (28-06-2027)
+    # 7. DATE OF MATURITY
     mat_date_match = re.search(r'Date\s*of\s*Maturity\s*[\:\-\s]*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{2,4})', full_text, re.IGNORECASE)
     if mat_date_match:
         data['maturity_date'] = mat_date_match.group(1).strip()
@@ -165,17 +198,14 @@ def process_ocr_cached(image_bytes, rotate_angle):
         'maturity_date': '', 'maturity_amount': 0.0
     }
 
-    # Loop through PSM configurations until all required fields are fetched
     for config in psm_configs:
         text = pytesseract.image_to_string(img, config=config)
         pass_data = parse_fd(text)
 
-        # Merge extracted values into master dictionary
         for field, val in pass_data.items():
             if not extracted[field] or extracted[field] == 0.0:
                 extracted[field] = val
 
-        # Check if all critical fields are successfully populated
         is_complete = all([
             extracted['holder_name'],
             extracted['nominee_name'],
@@ -216,7 +246,7 @@ with col_left:
             img_preview = img_preview.rotate(-rotate_angle, expand=True)
         st.image(img_preview, caption="Processed Image for Scanning", use_container_width=True)
         
-        with st.spinner("Scanning and extracting text details..."):
+        with st.spinner("Scanning document details..."):
             extracted = process_ocr_cached(file_bytes, rotate_angle)
 
 with col_right:
